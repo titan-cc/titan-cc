@@ -1,5 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db import get_db
 from app.deps import get_current_user
 from app.models import User
 from app.schemas import PresignRequest, PresignResponse
@@ -13,6 +15,7 @@ router = APIRouter()
 async def presign_upload(
     body: PresignRequest,
     user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ) -> PresignResponse:
     if body.content_type not in s3_service.ALLOWED_CONTENT_TYPES:
         raise HTTPException(
@@ -23,7 +26,7 @@ async def presign_upload(
     if user.quota is None:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Quota not initialized")
 
-    check_quota(user.quota, body.duration_seconds)
+    await check_quota(user.quota, body.duration_seconds, db)
 
     upload_url, s3_key, expires_at = s3_service.presign_put(
         user_id=user.id,

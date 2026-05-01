@@ -36,10 +36,10 @@ VALID_ROLES = {"user", "admin"}
 VALID_ACCESS_LEVELS = {"basic", "standard", "pro", "enterprise"}
 
 ACCESS_LEVEL_PRESETS: dict[str, dict[str, int]] = {
-    "basic":      {"max_concurrent_jobs": 2,  "max_minutes_per_month": 300,  "max_duration_seconds": 7_200},
-    "standard":   {"max_concurrent_jobs": 3,  "max_minutes_per_month": 600,  "max_duration_seconds": 7_200},
-    "pro":        {"max_concurrent_jobs": 5,  "max_minutes_per_month": 1_200, "max_duration_seconds": 14_400},
-    "enterprise": {"max_concurrent_jobs": 10, "max_minutes_per_month": 5_000, "max_duration_seconds": 28_800},
+    "basic":      {"max_concurrent_jobs": 12, "max_minutes_per_month": 300,  "max_duration_seconds": 7_200},
+    "standard":   {"max_concurrent_jobs": 12, "max_minutes_per_month": 600,  "max_duration_seconds": 7_200},
+    "pro":        {"max_concurrent_jobs": 12, "max_minutes_per_month": 1_200, "max_duration_seconds": 14_400},
+    "enterprise": {"max_concurrent_jobs": 12, "max_minutes_per_month": 5_000, "max_duration_seconds": 28_800},
 }
 
 # Simple TTL cache: key → (fetched_at, data)

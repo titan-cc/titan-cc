@@ -17,7 +17,7 @@ from app.schemas import (
     TranscriptResponse,
 )
 from app.services import s3 as s3_service
-from app.services.quotas import check_quota
+from app.services.quotas import check_concurrent, check_quota
 
 router = APIRouter()
 
@@ -87,7 +87,8 @@ async def create_job(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Quota not initialized")
 
     # Re-check quota (defense in depth — presign already checked, but race conditions exist)
-    check_quota(user.quota, body.duration_seconds)
+    await check_quota(user.quota, body.duration_seconds, db)
+    await check_concurrent(user.quota, user.id, db)
 
     job = Job(
         user_id=user.id,

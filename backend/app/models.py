@@ -69,7 +69,7 @@ class Quota(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
     )
-    max_concurrent_jobs: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
+    max_concurrent_jobs: Mapped[int] = mapped_column(Integer, nullable=False, default=12)
     max_minutes_per_month: Mapped[int] = mapped_column(Integer, nullable=False, default=300)
     max_duration_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=7200)
     minutes_used_this_month: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
