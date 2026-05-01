@@ -32,7 +32,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # ── Bake Whisper large-v3 into the image (eliminates cold-start download) ──────
 # Uses CTranslate2 int8 during build (CPU); at runtime it will load float16 on GPU.
-RUN python -c "from faster_whisper import WhisperModel; WhisperModel('large-v3', device='cpu', compute_type='int8')"
+RUN python -c "from faster_whisper import WhisperModel; WhisperModel('medium', device='cpu', compute_type='int8')"
 
 # ── Bake Silero VAD model ──────────────────────────────────────────────────────
 RUN python -c "import torch; torch.hub.load('snakers4/silero-vad', 'silero_vad', trust_repo=True)"
