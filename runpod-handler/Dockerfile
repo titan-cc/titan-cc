@@ -25,7 +25,7 @@ COPY requirements.txt .
 
 # Install PyTorch (CUDA 12.4 wheel) first so faster-whisper links the GPU build
 RUN pip install --no-cache-dir \
-        torch==2.3.1 torchaudio==2.3.1 \
+        torch==2.6.0 torchaudio==2.6.0 \
         --index-url https://download.pytorch.org/whl/cu124
 
 RUN pip install --no-cache-dir -r requirements.txt
