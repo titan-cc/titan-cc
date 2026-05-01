@@ -183,6 +183,12 @@ def _send_failed(
 
 def handler(job: dict) -> dict:
     inp: dict = job["input"]
+
+    # Warmup ping — just confirm the worker is alive, skip all pipeline work.
+    if inp.get("type") == "warmup":
+        logger.info("warmup_ping: worker is warm and ready")
+        return {"status": "warm"}
+
     job_id: str = inp["job_id"]
     claim_token: str = inp["claim_token"]
     s3_key: str = inp["s3_key"]

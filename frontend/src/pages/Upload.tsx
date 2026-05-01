@@ -5,6 +5,12 @@ import { useQuery } from "@tanstack/react-query";
 import { apiFetch } from "@/api/client";
 import type { PresignResponse, Job, UserMeResponse } from "@/api/types";
 
+interface WorkerStatus {
+  warm: boolean;
+  idle_workers: number;
+  running_workers: number;
+}
+
 type Stage = "idle" | "ready" | "uploading" | "creating" | "error";
 
 interface FileInfo {
@@ -154,6 +160,32 @@ export default function Upload() {
   const [errorMsg, setErrorMsg] = useState("");
   const [dragging, setDragging] = useState(false);
   const [uploadPct, setUploadPct] = useState(0);
+  const [warmingUp, setWarmingUp] = useState(false);
+
+  const { data: workerStatus } = useQuery<WorkerStatus>({
+    queryKey: ["worker-status"],
+    queryFn: async () => {
+      const token = await getToken();
+      const res = await apiFetch("/system/worker-status", { token: token! });
+      return res.json();
+    },
+    refetchInterval: warmingUp ? 5_000 : 30_000,
+    staleTime: 4_000,
+  });
+
+  const handleWarmup = async () => {
+    if (warmingUp || workerStatus?.warm) return;
+    setWarmingUp(true);
+    try {
+      const token = await getToken();
+      await apiFetch("/system/warmup", { method: "POST", token: token! });
+    } catch {
+      // best-effort; polling will still detect when warm
+    }
+  };
+
+  // Stop warmup spinner once worker is detected as warm
+  if (warmingUp && workerStatus?.warm) setWarmingUp(false);
 
   const { data: me } = useQuery<UserMeResponse>({
     queryKey: ["me"],
@@ -249,6 +281,65 @@ export default function Upload() {
         <p className="text-sm mb-6" style={{ color: "var(--text-secondary)" }}>
           Upload an audio or video file to get started.
         </p>
+
+        {/* Worker status banner */}
+        {workerStatus && (
+          <div
+            className="flex items-center justify-between gap-3 rounded-xl px-4 py-3 mb-4 text-sm"
+            style={{
+              backgroundColor: workerStatus.warm
+                ? "color-mix(in srgb, var(--status-completed) 12%, transparent)"
+                : warmingUp
+                ? "color-mix(in srgb, var(--brand) 10%, transparent)"
+                : "color-mix(in srgb, var(--status-processing) 12%, transparent)",
+              border: `1px solid ${workerStatus.warm
+                ? "color-mix(in srgb, var(--status-completed) 30%, transparent)"
+                : warmingUp
+                ? "color-mix(in srgb, var(--brand) 25%, transparent)"
+                : "color-mix(in srgb, var(--status-processing) 30%, transparent)"}`,
+            }}
+          >
+            <div className="flex items-center gap-2.5">
+              {workerStatus.warm ? (
+                <>
+                  <span className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: "var(--status-completed)" }} />
+                  <span style={{ color: "var(--status-completed)" }} className="font-medium">
+                    Worker ready — transcription will start instantly
+                  </span>
+                </>
+              ) : warmingUp ? (
+                <>
+                  <svg className="animate-spin h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" style={{ color: "var(--brand)" }}>
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                  </svg>
+                  <span style={{ color: "var(--brand-dark)" }} className="font-medium">
+                    Warming up worker — ready in ~90 seconds
+                  </span>
+                </>
+              ) : (
+                <>
+                  <span className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: "var(--status-processing)" }} />
+                  <span style={{ color: "var(--text-secondary)" }}>
+                    Worker is cold — expect a ~2 min startup delay
+                  </span>
+                </>
+              )}
+            </div>
+            {!workerStatus.warm && !warmingUp && (
+              <button
+                onClick={handleWarmup}
+                className="shrink-0 text-xs font-semibold px-3 py-1.5 rounded-lg transition-ui"
+                style={{
+                  backgroundColor: "var(--brand)",
+                  color: "#fff",
+                }}
+              >
+                Warm up
+              </button>
+            )}
+          </div>
+        )}
 
         {/* Drop zone */}
         <div

@@ -32,6 +32,21 @@ class JobConfig(BaseModel):
 
 # ── Job CRUD ──────────────────────────────────────────────────────────────────
 
+# ── System / worker health ─────────────────────────────────────────────────────
+
+class WorkerStatusResponse(BaseModel):
+    warm: bool
+    idle_workers: int
+    running_workers: int
+
+
+class WarmupResponse(BaseModel):
+    already_warm: bool
+    message: str
+
+
+# ── Job CRUD ──────────────────────────────────────────────────────────────────
+
 class JobCreateRequest(BaseModel):
     s3_key: str
     filename: str | None = None

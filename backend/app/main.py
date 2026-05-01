@@ -10,9 +10,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.deps import get_current_user
 from app.models import User
-from app.routers import admin, jobs, notifications, uploads, webhooks
+from app.routers import admin, jobs, notifications, system, uploads, webhooks
 from app.schemas import UserMeResponse
 from app.services.dispatcher import run_dispatcher
+from app.services.watchdog import run_watchdog
 
 logger = structlog.get_logger()
 
@@ -22,14 +23,15 @@ if settings.sentry_dsn:
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
-    task: asyncio.Task | None = None
+    tasks: list[asyncio.Task] = []
     if settings.runpod_endpoint_url:
-        task = asyncio.create_task(run_dispatcher())
-        logger.info("dispatcher_task_created")
+        tasks.append(asyncio.create_task(run_dispatcher()))
+        tasks.append(asyncio.create_task(run_watchdog()))
+        logger.info("background_tasks_started")
     else:
         logger.warning("dispatcher_disabled", reason="RUNPOD_ENDPOINT_URL not set")
     yield
-    if task is not None:
+    for task in tasks:
         task.cancel()
         try:
             await task
@@ -47,6 +49,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(system.router, prefix="/system", tags=["system"])
 app.include_router(uploads.router, prefix="/uploads", tags=["uploads"])
 app.include_router(jobs.router, prefix="/jobs", tags=["jobs"])
 app.include_router(notifications.router, prefix="/notifications", tags=["notifications"])

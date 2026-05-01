@@ -50,6 +50,40 @@ async def dispatch_job(
         return None
 
 
+async def get_endpoint_health() -> dict:
+    """Return RunPod endpoint health (worker counts). Returns zeros on any error."""
+    if not settings.runpod_endpoint_id:
+        return {"workers": {"idle": 0, "running": 0}}
+    url = f"{_BASE}/{settings.runpod_endpoint_id}/health"
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(url, headers=_headers())
+            resp.raise_for_status()
+            return resp.json()
+    except Exception as exc:
+        logger.warning("health_check_failed", error=str(exc))
+        return {"workers": {"idle": 0, "running": 0}}
+
+
+async def submit_warmup_job() -> str | None:
+    """Submit a no-op warmup ping to RunPod to trigger cold start. Returns job ID."""
+    if not settings.runpod_endpoint_url:
+        return None
+    payload = {"input": {"type": "warmup"}}
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                settings.runpod_endpoint_url, json=payload, headers=_headers()
+            )
+            resp.raise_for_status()
+            job_id: str = resp.json()["id"]
+        logger.info("warmup_dispatched", runpod_job_id=job_id)
+        return job_id
+    except Exception as exc:
+        logger.warning("warmup_dispatch_failed", error=str(exc))
+        return None
+
+
 async def cancel_runpod_job(runpod_job_id: str) -> None:
     """Cancel a RunPod job. Best-effort — errors are logged, not raised."""
     if not settings.runpod_endpoint_id:
