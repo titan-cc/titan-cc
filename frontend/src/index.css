@@ -1,0 +1,162 @@
+/* ── Gotham font family ─────────────────────────────────────────────────────── */
+@font-face {
+  font-family: "Gotham";
+  src: url("/fonts/Gotham-Book.otf") format("opentype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Gotham";
+  src: url("/fonts/Gotham-BookIta.otf") format("opentype");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Gotham";
+  src: url("/fonts/Gotham-Medium.otf") format("opentype");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Gotham";
+  src: url("/fonts/Gotham-MediumIta.otf") format("opentype");
+  font-weight: 500;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Gotham";
+  src: url("/fonts/Gotham-Bold.otf") format("opentype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Gotham";
+  src: url("/fonts/Gotham-BoldIta.otf") format("opentype");
+  font-weight: 700;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Gotham";
+  src: url("/fonts/Gotham-Black.otf") format("opentype");
+  font-weight: 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ── Design tokens ──────────────────────────────────────────────────────────── */
+:root {
+  /* Primary brand — Legacy Magenta */
+  --brand:             #EC008C;
+  --brand-dark:        #A70063;
+  --brand-subtle:      #fce8f3;
+  --brand-tint:        #f9c5e4;
+
+  /* Nav shell */
+  --nav-bg:            #1a0315;
+  --nav-border:        rgba(236, 0, 140, 0.25);
+  --nav-active-bg:     rgba(236, 0, 140, 0.18);
+  --nav-active-text:   #f9c5e4;
+  --nav-idle-text:     rgba(255, 255, 255, 0.55);
+
+  /* Surfaces */
+  --surface:           #ffffff;
+  --surface-subtle:    #faf8fb;
+  --surface-raised:    #f5f0f7;
+
+  /* Text hierarchy */
+  --text-primary:      #1a0315;
+  --text-secondary:    #4b3a57;
+  --text-tertiary:     #9b8fa8;
+
+  /* Borders */
+  --border:            #e8e0ec;
+  --border-strong:     #d4c9db;
+
+  /* Semantic status */
+  --status-processing: #F26522;
+  --status-completed:  #39B54A;
+  --status-failed:     #DC2626;
+  --status-dispatched: #0076A3;
+}
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    font-feature-settings: "kern" 1, "liga" 1;
+  }
+  body {
+    background-color: var(--surface-subtle);
+    color: var(--text-primary);
+    font-family: "Gotham", system-ui, sans-serif;
+  }
+  * {
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+
+@layer utilities {
+  .transition-ui {
+    transition-property: color, background-color, border-color, opacity, transform, box-shadow;
+    transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+    transition-duration: 150ms;
+  }
+  .transition-width {
+    transition-property: width;
+    transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+    transition-duration: 600ms;
+  }
+  .btn-primary {
+    background-color: var(--brand);
+    color: #fff;
+    transition: background-color 150ms cubic-bezier(0.16, 1, 0.3, 1),
+                transform 100ms cubic-bezier(0.16, 1, 0.3, 1),
+                box-shadow 150ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .btn-primary:hover {
+    background-color: var(--brand-dark);
+    box-shadow: 0 4px 14px rgba(236, 0, 140, 0.28);
+  }
+  .btn-primary:active {
+    transform: scale(0.98) translateY(1px);
+    box-shadow: none;
+  }
+  .btn-ghost {
+    background-color: transparent;
+    color: var(--text-secondary);
+    border: 1px solid var(--border);
+    transition: background-color 150ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .btn-ghost:hover {
+    background-color: var(--surface-raised);
+  }
+  .btn-ghost:active {
+    transform: scale(0.98);
+  }
+}
+
+@keyframes shimmer {
+  0%   { transform: translateX(-150%); }
+  100% { transform: translateX(150%); }
+}
+.animate-shimmer {
+  animation: shimmer 1.8s ease-in-out infinite;
+}
+
+@keyframes pulse-brand {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}
+.animate-pulse-brand {
+  animation: pulse-brand 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
