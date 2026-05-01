@@ -1,41 +1,43 @@
 # Titan CC — RunPod GPU transcription worker
-# Base: CUDA 12.4 + cuDNN runtime on Ubuntu 24.04 (Python 3.12 in default repos)
-FROM nvidia/cuda:12.6.3-cudnn-runtime-ubuntu24.04
+#
+# Base: RunPod's official PyTorch 2.4 + CUDA 12.4 image.
+# This base is pre-cached on every RunPod worker, so only our delta layers
+# (~2 GB: packages + Whisper model) are pulled on cold start → ~90s total
+# instead of 10+ minutes with a plain nvidia/cuda base.
+FROM runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    LD_LIBRARY_PATH=/usr/local/cuda/lib64:${LD_LIBRARY_PATH} \
-    PIP_BREAK_SYSTEM_PACKAGES=1
+    # Prevent HuggingFace from hitting the network at runtime (model is baked in).
+    HF_HUB_OFFLINE=1 \
+    # Tell torch.hub to use the baked cache directory.
+    TORCH_HOME=/root/.cache/torch
 
-# ── System packages ────────────────────────────────────────────────────────────
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        python3.12 python3.12-dev python3-pip \
-        ffmpeg \
-        git \
-        curl \
-    && rm -rf /var/lib/apt/lists/* \
-    && ln -sf /usr/bin/python3.12 /usr/bin/python3 \
-    && ln -sf /usr/bin/python3 /usr/bin/python \
-    && ln -sf /usr/bin/pip3 /usr/bin/pip
+# ffmpeg for audio conversion
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
 
-# ── Python packages ────────────────────────────────────────────────────────────
 WORKDIR /app
 COPY requirements.txt .
 
-# Install PyTorch (CUDA 12.4 wheel) first so faster-whisper links the GPU build
-RUN pip install --no-cache-dir \
-        torch==2.6.0 torchaudio==2.6.0 \
-        --index-url https://download.pytorch.org/whl/cu124
-
+# PyTorch is already in the base image; install only our extras.
 RUN pip install --no-cache-dir -r requirements.txt
 
-# ── Bake Whisper large-v3 into the image (eliminates cold-start download) ──────
-# Uses CTranslate2 int8 during build (CPU); at runtime it will load float16 on GPU.
-RUN python -c "from faster_whisper import WhisperModel; WhisperModel('medium', device='cpu', compute_type='int8')"
+# ── Bake Whisper medium into image ─────────────────────────────────────────────
+# Use CPU/int8 during build (no GPU on build nodes); at runtime CTranslate2
+# re-quantises to float16 on the GPU from the same cached weights.
+# HF_HUB_OFFLINE=0 overrides the ENV so the download can actually happen here.
+RUN HF_HUB_OFFLINE=0 python -c "\
+from faster_whisper import WhisperModel; \
+WhisperModel('medium', device='cpu', compute_type='int8'); \
+print('Whisper medium baked OK')"
 
-# ── Bake Silero VAD model ──────────────────────────────────────────────────────
-RUN python -c "import torch; torch.hub.load('snakers4/silero-vad', 'silero_vad', trust_repo=True)"
+# ── Bake Silero VAD ────────────────────────────────────────────────────────────
+RUN python -c "\
+import torch; \
+torch.hub.load('snakers4/silero-vad', 'silero_vad', trust_repo=True); \
+print('Silero VAD baked OK')"
 
 # ── App code ───────────────────────────────────────────────────────────────────
 COPY . .

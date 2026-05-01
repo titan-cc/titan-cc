@@ -1,9 +1,25 @@
-export default function ProgressBar({ pct, shimmer = true }: { pct: number; shimmer?: boolean }) {
-  const clamped = Math.min(100, Math.max(0, pct));
+export default function ProgressBar({
+  pct,
+  shimmer = true,
+  indeterminate = false,
+}: {
+  pct?: number;
+  shimmer?: boolean;
+  indeterminate?: boolean;
+}) {
+  if (indeterminate) {
+    return (
+      <div className="relative w-full h-[3px] rounded-full overflow-hidden" style={{ backgroundColor: "var(--brand-tint)" }}>
+        <div className="animate-indeterminate" style={{ backgroundColor: "var(--brand)", width: "45%" }} />
+      </div>
+    );
+  }
+
+  const clamped = Math.min(100, Math.max(0, pct ?? 0));
   return (
     <div className="relative w-full h-[3px] rounded-full overflow-hidden" style={{ backgroundColor: "var(--brand-tint)" }}>
       <div
-        className="absolute inset-y-0 left-0 rounded-full transition-width"
+        className="absolute inset-y-0 left-0 rounded-full transition-[width] duration-500 ease-out"
         style={{ width: `${clamped}%`, backgroundColor: "var(--brand)" }}
       >
         {shimmer && clamped < 100 && (

@@ -103,6 +103,14 @@ async def _handle_progress(job: Job, payload: dict[str, Any], db: AsyncSession) 
         p = WebhookProgressPayload(**payload)
     except Exception:
         return
+    # First progress event means the worker is running — auto-transition dispatched → processing.
+    if job.status == JobStatus.dispatched:
+        job.status = JobStatus.processing
+        job.started_at = datetime.now(UTC)
+        db.add(JobEvent(
+            job_id=job.id, event_type="started",
+            from_status=JobStatus.dispatched, to_status=JobStatus.processing,
+        ))
     job.current_stage = p.current_stage
     job.progress_pct = p.progress_pct
     job.updated_at = datetime.now(UTC)

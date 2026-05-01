@@ -8,7 +8,7 @@ import boto3
 import httpx
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -387,3 +387,37 @@ async def get_billing(
     )
     _billing_cache[cache_key] = (time.monotonic(), result)
     return result
+
+
+@router.post("/jobs/reset-dispatched")
+async def reset_stuck_dispatched_jobs(
+    older_than_minutes: int = Query(default=5, ge=1, le=120),
+    x_admin_key: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    if x_admin_key != settings.runpod_webhook_secret:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    """Reset dispatched jobs stuck for longer than older_than_minutes back to queued."""
+    from app.models import JobEvent, JobStatus
+    cutoff = datetime.now(UTC) - timedelta(minutes=older_than_minutes)
+    result = await db.execute(
+        select(Job).where(
+            Job.status == JobStatus.dispatched,
+            Job.dispatched_at < cutoff,
+        )
+    )
+    jobs = result.scalars().all()
+    for job in jobs:
+        job.status = JobStatus.queued
+        job.claim_token = None
+        job.dispatched_at = None
+        job.updated_at = datetime.now(UTC)
+        db.add(JobEvent(
+            job_id=job.id,
+            event_type="admin_reset",
+            from_status=JobStatus.dispatched,
+            to_status=JobStatus.queued,
+        ))
+    await db.commit()
+    logger.info("admin_reset_dispatched", count=len(jobs))
+    return {"reset": len(jobs), "job_ids": [str(j.id) for j in jobs]}

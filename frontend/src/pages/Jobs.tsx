@@ -124,13 +124,23 @@ export default function Jobs() {
                       </svg>
                     </div>
                   </div>
-                  {job.status === "processing" && job.progress_pct != null && (
+                  {(job.status === "queued" || job.status === "dispatched" || job.status === "processing") && (
                     <div className="mt-2.5">
                       <div className="flex justify-between text-[11px] mb-1.5" style={{ color: "var(--text-tertiary)" }}>
-                        <span>{job.current_stage ?? "processing"}</span>
-                        <span className="font-mono">{job.progress_pct}%</span>
+                        <span>
+                          {job.status === "queued" && "Waiting in queue"}
+                          {job.status === "dispatched" && "Waiting for GPU…"}
+                          {job.status === "processing" && (job.current_stage ?? "Transcribing…")}
+                        </span>
+                        {job.status === "processing" && job.progress_pct != null && (
+                          <span className="font-mono">{job.progress_pct}%</span>
+                        )}
                       </div>
-                      <ProgressBar pct={job.progress_pct} />
+                      {job.status === "processing" && job.progress_pct != null ? (
+                        <ProgressBar pct={job.progress_pct} />
+                      ) : (
+                        <ProgressBar indeterminate />
+                      )}
                     </div>
                   )}
                 </Link>

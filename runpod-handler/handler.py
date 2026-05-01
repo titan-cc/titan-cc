@@ -219,4 +219,15 @@ def handler(job: dict) -> dict:
             pass
 
 
+# Pre-load Whisper model into GPU memory before accepting any jobs.
+# This pays the 60-90s model-load cost at container startup, not on the
+# first job — so every job sees a warm model regardless of cold start.
+logger.info("preloading_model")
+try:
+    from pipeline.transcribe import _load_model
+    _load_model()
+    logger.info("model_preloaded")
+except Exception as _exc:
+    logger.warning("model_preload_failed", error=str(_exc))
+
 runpod.serverless.start({"handler": handler})

@@ -235,17 +235,27 @@ export default function JobDetail() {
           <span className="text-[11px] font-mono tabular-nums" style={{ color: "#d0d2d5" }}>{job.id.slice(0, 8)}</span>
         </div>
 
-        {/* Progress bar when processing */}
-        {job.status === "processing" && job.progress_pct != null && (
+        {/* Progress bar for all active states */}
+        {(job.status === "queued" || job.status === "dispatched" || job.status === "processing") && (
           <div
             className="mb-5 p-3.5 rounded-xl"
             style={{ backgroundColor: "var(--surface-subtle)", border: "1px solid var(--border)" }}
           >
             <div className="flex justify-between text-xs mb-2" style={{ color: "var(--text-secondary)" }}>
-              <span className="font-medium">{job.current_stage ?? "processing"}</span>
-              <span className="font-mono tabular-nums">{job.progress_pct}%</span>
+              <span className="font-medium">
+                {job.status === "queued" && "Waiting in queue"}
+                {job.status === "dispatched" && "Waiting for GPU…"}
+                {job.status === "processing" && (job.current_stage ?? "Transcribing…")}
+              </span>
+              {job.status === "processing" && job.progress_pct != null && (
+                <span className="font-mono tabular-nums">{job.progress_pct}%</span>
+              )}
             </div>
-            <ProgressBar pct={job.progress_pct} />
+            {job.status === "processing" && job.progress_pct != null ? (
+              <ProgressBar pct={job.progress_pct} />
+            ) : (
+              <ProgressBar indeterminate />
+            )}
           </div>
         )}
 
