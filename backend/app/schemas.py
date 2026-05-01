@@ -191,6 +191,15 @@ class AdminUserListResponse(BaseModel):
     next_cursor: uuid.UUID | None
 
 
+class AdminJobResponse(JobResponse):
+    user_email: str
+
+
+class AdminJobListResponse(BaseModel):
+    jobs: list[AdminJobResponse]
+    next_cursor: uuid.UUID | None
+
+
 class UpdateUserRequest(BaseModel):
     role: str | None = None          # 'user' | 'admin'
     is_enabled: bool | None = None

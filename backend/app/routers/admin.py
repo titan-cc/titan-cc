@@ -17,6 +17,8 @@ from app.db import get_db
 from app.deps import require_admin
 from app.models import Job, Quota, User
 from app.schemas import (
+    AdminJobListResponse,
+    AdminJobResponse,
     AdminUserListResponse,
     AdminUserResponse,
     BillingLineItem,
@@ -390,6 +392,49 @@ async def get_billing(
     )
     _billing_cache[cache_key] = (time.monotonic(), result)
     return result
+
+
+@router.get("/jobs", response_model=AdminJobListResponse)
+async def list_all_jobs(
+    cursor: uuid.UUID | None = None,
+    limit: int = Query(50, ge=1, le=100),
+    status_filter: str | None = Query(None, alias="status"),
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> Any:
+    from app.models import JobStatus
+    q = (
+        select(Job, User.email.label("user_email"))
+        .join(User, Job.user_id == User.id)
+        .order_by(Job.created_at.desc())
+    )
+
+    if status_filter:
+        try:
+            q = q.where(Job.status == JobStatus(status_filter))
+        except ValueError:
+            raise HTTPException(status_code=422, detail=f"Invalid status: {status_filter}")
+
+    if cursor:
+        cursor_result = await db.execute(select(Job.created_at).where(Job.id == cursor))
+        cursor_ts = cursor_result.scalar_one_or_none()
+        if cursor_ts:
+            q = q.where(Job.created_at < cursor_ts)
+
+    q = q.limit(limit + 1)
+    result = await db.execute(q)
+    rows = result.all()
+
+    has_more = len(rows) > limit
+    rows = rows[:limit]
+
+    from app.schemas import JobResponse
+    jobs_out = [
+        AdminJobResponse(**JobResponse.model_validate(row.Job).model_dump(), user_email=row.user_email)
+        for row in rows
+    ]
+    next_cursor = rows[-1].Job.id if has_more and rows else None
+    return AdminJobListResponse(jobs=jobs_out, next_cursor=next_cursor)
 
 
 @router.post("/jobs/reset-dispatched")

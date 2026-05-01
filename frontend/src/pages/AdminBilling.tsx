@@ -250,20 +250,62 @@ export default function AdminBilling() {
         </div>
       ) : null}
 
-      {/* Config hint if any provider is unconfigured */}
-      {data && [data.runpod, data.railway, data.aws].some((p) => p.error?.includes("not configured")) && (
-        <div
-          className="rounded-2xl px-5 py-4"
-          style={{ backgroundColor: "rgba(251,191,36,0.05)", border: "1px solid rgba(251,191,36,0.2)" }}
-        >
-          <p className="text-[12px] font-semibold mb-1" style={{ color: "#fbbf24" }}>Missing API tokens</p>
-          <p className="text-[12px] leading-relaxed" style={{ color: "var(--text-secondary)" }}>
-            Set <code className="px-1 rounded" style={{ backgroundColor: "rgba(255,255,255,0.07)" }}>RAILWAY_API_TOKEN</code> and/or{" "}
-            <code className="px-1 rounded" style={{ backgroundColor: "rgba(255,255,255,0.07)" }}>RUNPOD_API_KEY</code> in your Railway environment variables.
-            AWS Cost Explorer requires the <code className="px-1 rounded" style={{ backgroundColor: "rgba(255,255,255,0.07)" }}>ce:GetCostAndUsage</code> IAM permission on your existing AWS credentials.
-          </p>
-        </div>
-      )}
+      {/* Config hints — one per provider if needed */}
+      {data && (() => {
+        const hints: { label: string; steps: React.ReactNode[] }[] = [];
+
+        if (data.railway.error?.includes("not configured")) {
+          hints.push({
+            label: "Railway API token missing",
+            steps: [
+              <>Go to <strong>railway.com → Account Settings → Tokens</strong> and create a new token.</>,
+              <>Add <code className="px-1 rounded" style={{ backgroundColor: "rgba(255,255,255,0.07)" }}>RAILWAY_API_TOKEN=&lt;token&gt;</code> to the backend service variables on Railway.</>,
+            ],
+          });
+        }
+
+        if (data.runpod.error?.includes("not configured")) {
+          hints.push({
+            label: "RunPod API key missing",
+            steps: [
+              <>Go to <strong>runpod.io → Settings → API Keys</strong> and create a key.</>,
+              <>Add <code className="px-1 rounded" style={{ backgroundColor: "rgba(255,255,255,0.07)" }}>RUNPOD_API_KEY=&lt;key&gt;</code> to the backend service variables on Railway.</>,
+            ],
+          });
+        }
+
+        if (data.aws.error?.includes("not authorized") || data.aws.error?.includes("AccessDenied")) {
+          hints.push({
+            label: "AWS Cost Explorer permission missing",
+            steps: [
+              <>In the <strong>AWS IAM console</strong>, find the <code className="px-1 rounded" style={{ backgroundColor: "rgba(255,255,255,0.07)" }}>titan-cc-backend</code> user.</>,
+              <>Attach an inline policy granting <code className="px-1 rounded" style={{ backgroundColor: "rgba(255,255,255,0.07)" }}>ce:GetCostAndUsage</code> on <code className="px-1 rounded" style={{ backgroundColor: "rgba(255,255,255,0.07)" }}>*</code>.</>,
+              <>Cost Explorer is global — the policy resource must be <code className="px-1 rounded" style={{ backgroundColor: "rgba(255,255,255,0.07)" }}>arn:aws:ce:*:*:*</code> or <code className="px-1 rounded" style={{ backgroundColor: "rgba(255,255,255,0.07)" }}>*</code>.</>,
+            ],
+          });
+        }
+
+        if (hints.length === 0) return null;
+
+        return (
+          <div className="space-y-3">
+            {hints.map((hint) => (
+              <div
+                key={hint.label}
+                className="rounded-2xl px-5 py-4"
+                style={{ backgroundColor: "rgba(251,191,36,0.05)", border: "1px solid rgba(251,191,36,0.2)" }}
+              >
+                <p className="text-[12px] font-semibold mb-2" style={{ color: "#fbbf24" }}>{hint.label}</p>
+                <ol className="space-y-1 list-decimal list-inside">
+                  {hint.steps.map((step, i) => (
+                    <li key={i} className="text-[12px] leading-relaxed" style={{ color: "var(--text-secondary)" }}>{step}</li>
+                  ))}
+                </ol>
+              </div>
+            ))}
+          </div>
+        );
+      })()}
     </div>
   );
 }

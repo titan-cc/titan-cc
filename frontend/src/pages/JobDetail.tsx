@@ -1,12 +1,29 @@
 import { Link, useParams } from "react-router-dom";
 import { useAuth } from "@clerk/clerk-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useRef, useState } from "react";
 import { apiFetch } from "@/api/client";
 import { useTranscript } from "@/api/hooks";
 import type { Job } from "@/api/types";
 import StatusBadge from "@/components/StatusBadge";
 import ProgressBar from "@/components/ProgressBar";
 import { isTerminal } from "@/lib/poll";
+
+function useElapsedSeconds(since: string | null | undefined): number {
+  const [elapsed, setElapsed] = useState(0);
+  const rafRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!since) { setElapsed(0); return; }
+    const start = new Date(since).getTime();
+    const tick = () => {
+      setElapsed(Math.floor((Date.now() - start) / 1000));
+      rafRef.current = window.setTimeout(tick, 1000);
+    };
+    tick();
+    return () => { if (rafRef.current !== null) clearTimeout(rafRef.current); };
+  }, [since]);
+  return elapsed;
+}
 
 function formatDuration(s: number): string {
   const h = Math.floor(s / 3600);
@@ -181,7 +198,6 @@ function TimelineDot({ done, active }: { done: boolean; active?: boolean }) {
 }
 
 function JobTimeline({ job }: { job: Job }) {
-  const terminal = ["completed", "failed", "cancelled"].includes(job.status);
   const steps: { key: string; label: string; ts: string | null; active: boolean }[] = [
     {
       key: "queued",
@@ -216,7 +232,6 @@ function JobTimeline({ job }: { job: Job }) {
       </p>
       <div className="flex flex-col gap-0">
         {steps.map((step, i) => {
-          const done = !!step.ts && (terminal || i < steps.findIndex(s => s.active || !s.ts));
           const isDone = !!step.ts;
           const prev = i > 0 ? steps[i - 1] : null;
           const elapsed = isDone && prev?.ts ? elapsedSecs(prev.ts, step.ts) : null;
@@ -296,6 +311,8 @@ export default function JobDetail() {
     enabled: !!id,
   });
 
+  const gpuElapsed = useElapsedSeconds(job?.status === "dispatched" ? job.dispatched_at : null);
+
   if (isLoading) {
     return (
       <div className="max-w-lg animate-pulse space-y-4">
@@ -363,7 +380,7 @@ export default function JobDetail() {
             <div className="flex justify-between text-xs mb-2" style={{ color: "var(--text-secondary)" }}>
               <span className="font-medium">
                 {job.status === "queued" && "Waiting in queue"}
-                {job.status === "dispatched" && "Waiting for GPU…"}
+                {job.status === "dispatched" && `Warming up GPU${gpuElapsed > 0 ? ` — ${gpuElapsed} s` : " — usually ready in 60–90 s"}`}
                 {job.status === "processing" && (job.current_stage ?? "Transcribing…")}
               </span>
               {job.status === "processing" && job.progress_pct != null && (

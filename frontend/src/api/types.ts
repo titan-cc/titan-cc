@@ -97,6 +97,15 @@ export interface UserMeResponse extends User {
   quota: QuotaResponse | null;
 }
 
+export interface AdminJob extends Job {
+  user_email: string;
+}
+
+export interface AdminJobListResponse {
+  jobs: AdminJob[];
+  next_cursor: string | null;
+}
+
 export interface AdminUser {
   id: string;
   email: string;
