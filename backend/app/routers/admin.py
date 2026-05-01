@@ -1,19 +1,27 @@
+import asyncio
+import time
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+import boto3
+import httpx
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.config import settings
 from app.db import get_db
 from app.deps import require_admin
 from app.models import Job, Quota, User
 from app.schemas import (
     AdminUserListResponse,
     AdminUserResponse,
+    BillingLineItem,
+    BillingResponse,
+    ProviderBilling,
     QuotaResponse,
     UpdateUserRequest,
 )
@@ -32,8 +40,18 @@ ACCESS_LEVEL_PRESETS: dict[str, dict[str, int]] = {
     "enterprise": {"max_concurrent_jobs": 10, "max_minutes_per_month": 5_000, "max_duration_seconds": 28_800},
 }
 
+# Simple TTL cache: key → (fetched_at, data)
+_billing_cache: dict[str, tuple[float, Any]] = {}
+_BILLING_TTL = 300.0  # 5 minutes
 
-def _build_response(user: User, job_count: int) -> AdminUserResponse:
+
+def _billing_period() -> str:
+    return datetime.now(UTC).strftime("%B %Y")
+
+
+# ── User management helpers ───────────────────────────────────────────────────
+
+def _build_user_response(user: User, job_count: int) -> AdminUserResponse:
     return AdminUserResponse(
         id=user.id,
         email=user.email,
@@ -46,6 +64,182 @@ def _build_response(user: User, job_count: int) -> AdminUserResponse:
         job_count=job_count,
     )
 
+
+# ── Billing fetchers ──────────────────────────────────────────────────────────
+
+async def _fetch_runpod() -> ProviderBilling:
+    period = _billing_period()
+    if not settings.runpod_api_key:
+        return ProviderBilling(provider="runpod", period=period, error="RUNPOD_API_KEY not configured")
+
+    query = """
+    {
+      myself {
+        creditBalance
+        spendLimit
+        currentSpendPerHr
+        serverlessDiscount { discountFactor }
+      }
+    }
+    """
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.post(
+                "https://api.runpod.io/graphql",
+                headers={"Authorization": f"Bearer {settings.runpod_api_key}"},
+                json={"query": query},
+            )
+            r.raise_for_status()
+            data = r.json()
+
+        myself = data.get("data", {}).get("myself") or {}
+        credit_balance = float(myself.get("creditBalance") or 0)
+        spend_limit = float(myself.get("spendLimit") or 0)
+        current_per_hr = float(myself.get("currentSpendPerHr") or 0)
+        discount = myself.get("serverlessDiscount") or {}
+        discount_pct = round((1 - float(discount.get("discountFactor") or 1)) * 100)
+
+        items = [
+            BillingLineItem(label="Credit balance", amount_usd=credit_balance),
+            BillingLineItem(label="Spend limit", amount_usd=spend_limit),
+        ]
+        meta: dict[str, Any] = {
+            "spend_rate_per_hr": current_per_hr,
+            "spend_rate_label": f"${current_per_hr:.4f}/hr",
+        }
+        if discount_pct:
+            meta["discount"] = f"{discount_pct}% serverless discount active"
+
+        return ProviderBilling(
+            provider="runpod",
+            period=period,
+            total_usd=credit_balance,
+            items=items,
+            meta=meta,
+        )
+    except Exception as exc:
+        logger.warning("billing_runpod_error", error=str(exc))
+        return ProviderBilling(provider="runpod", period=period, error=str(exc))
+
+
+async def _fetch_railway() -> ProviderBilling:
+    period = _billing_period()
+    if not settings.railway_api_token:
+        return ProviderBilling(provider="railway", period=period, error="RAILWAY_API_TOKEN not configured")
+
+    # Query current team usage + project list
+    query = """
+    {
+      me {
+        usage {
+          current { estimatedCost }
+          estimated { estimatedCost }
+        }
+        projects {
+          edges {
+            node {
+              id
+              name
+              usage {
+                current { estimatedCost }
+                estimated { estimatedCost }
+              }
+            }
+          }
+        }
+      }
+    }
+    """
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.post(
+                "https://backboard.railway.app/graphql/v2",
+                headers={
+                    "Authorization": f"Bearer {settings.railway_api_token}",
+                    "Content-Type": "application/json",
+                },
+                json={"query": query},
+            )
+            r.raise_for_status()
+            data = r.json()
+
+        errors = data.get("errors")
+        if errors:
+            return ProviderBilling(provider="railway", period=period, error=errors[0].get("message", "API error"))
+
+        me = data.get("data", {}).get("me") or {}
+        top_usage = me.get("usage") or {}
+        estimated_cost = top_usage.get("estimated", {}).get("estimatedCost") or \
+                         top_usage.get("current", {}).get("estimatedCost")
+        total = float(estimated_cost) if estimated_cost is not None else None
+
+        # Per-project breakdown
+        items: list[BillingLineItem] = []
+        for edge in (me.get("projects", {}).get("edges") or []):
+            node = edge.get("node") or {}
+            proj_usage = node.get("usage") or {}
+            cost_val = (proj_usage.get("estimated") or {}).get("estimatedCost") or \
+                       (proj_usage.get("current") or {}).get("estimatedCost")
+            if cost_val is not None:
+                items.append(BillingLineItem(label=node.get("name", "project"), amount_usd=float(cost_val)))
+
+        # If no top-level total but we have items, sum them
+        if total is None and items:
+            total = sum(i.amount_usd for i in items)
+
+        return ProviderBilling(provider="railway", period=period, total_usd=total, items=items)
+    except Exception as exc:
+        logger.warning("billing_railway_error", error=str(exc))
+        return ProviderBilling(provider="railway", period=period, error=str(exc))
+
+
+async def _fetch_aws() -> ProviderBilling:
+    period = _billing_period()
+    if not settings.aws_access_key_id or not settings.aws_secret_access_key:
+        return ProviderBilling(provider="aws", period=period, error="AWS credentials not configured")
+
+    def _sync_fetch() -> ProviderBilling:
+        now = datetime.now(UTC)
+        start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        # Cost Explorer end date is exclusive; must be > start
+        end = now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+        if end <= start:
+            end = start + timedelta(days=1)
+
+        client = boto3.client(
+            "ce",
+            region_name="us-east-1",  # Cost Explorer is us-east-1 only
+            aws_access_key_id=settings.aws_access_key_id,
+            aws_secret_access_key=settings.aws_secret_access_key,
+        )
+        resp = client.get_cost_and_usage(
+            TimePeriod={"Start": start.strftime("%Y-%m-%d"), "End": end.strftime("%Y-%m-%d")},
+            Granularity="MONTHLY",
+            Metrics=["UnblendedCost"],
+            GroupBy=[{"Type": "SERVICE", "Key": "SERVICE"}],
+        )
+
+        items: list[BillingLineItem] = []
+        total = 0.0
+        for group in resp.get("ResultsByTime", [{}])[0].get("Groups", []):
+            label = group["Keys"][0]
+            amount = float(group["Metrics"]["UnblendedCost"]["Amount"])
+            if amount > 0:
+                items.append(BillingLineItem(label=label, amount_usd=amount))
+                total += amount
+
+        items.sort(key=lambda x: x.amount_usd, reverse=True)
+        return ProviderBilling(provider="aws", period=period, total_usd=total, items=items)
+
+    try:
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, _sync_fetch)
+    except Exception as exc:
+        logger.warning("billing_aws_error", error=str(exc))
+        return ProviderBilling(provider="aws", period=period, error=str(exc))
+
+
+# ── User management endpoints ─────────────────────────────────────────────────
 
 @router.get("/users", response_model=AdminUserListResponse)
 async def list_users(
@@ -88,7 +282,7 @@ async def list_users(
     else:
         job_counts = {}
 
-    users_out = [_build_response(u, job_counts.get(u.id, 0)) for u in users]
+    users_out = [_build_user_response(u, job_counts.get(u.id, 0)) for u in users]
     next_cursor = users[-1].id if has_more and users else None
     return AdminUserListResponse(users=users_out, next_cursor=next_cursor)
 
@@ -107,7 +301,6 @@ async def update_user(
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
-    # Prevent self-demotion / self-disable
     is_self = user.id == admin.id
 
     if body.role is not None:
@@ -137,13 +330,11 @@ async def update_user(
     if user.quota:
         await db.refresh(user.quota)
 
-    count_result = await db.execute(
-        select(func.count(Job.id)).where(Job.user_id == user_id)
-    )
+    count_result = await db.execute(select(func.count(Job.id)).where(Job.user_id == user_id))
     job_count = count_result.scalar() or 0
 
     logger.info("admin_updated_user", admin_id=str(admin.id), target_user_id=str(user_id))
-    return _build_response(user, job_count)
+    return _build_user_response(user, job_count)
 
 
 @router.post("/users/{user_id}/quota/refresh", response_model=QuotaResponse)
@@ -167,3 +358,32 @@ async def refresh_quota(
 
     logger.info("admin_refreshed_quota", admin_id=str(admin.id), target_user_id=str(user_id))
     return QuotaResponse.model_validate(quota)
+
+
+# ── Billing endpoint ──────────────────────────────────────────────────────────
+
+@router.get("/billing", response_model=BillingResponse)
+async def get_billing(
+    refresh: bool = False,
+    admin: User = Depends(require_admin),
+) -> Any:
+    cache_key = "billing"
+    if not refresh and cache_key in _billing_cache:
+        fetched_at, cached = _billing_cache[cache_key]
+        if time.monotonic() - fetched_at < _BILLING_TTL:
+            return cached
+
+    runpod, railway, aws = await asyncio.gather(
+        _fetch_runpod(),
+        _fetch_railway(),
+        _fetch_aws(),
+    )
+
+    result = BillingResponse(
+        period=_billing_period(),
+        runpod=runpod,
+        railway=railway,
+        aws=aws,
+    )
+    _billing_cache[cache_key] = (time.monotonic(), result)
+    return result

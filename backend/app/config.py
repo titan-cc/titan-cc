@@ -24,6 +24,10 @@ class Settings(BaseSettings):
     runpod_endpoint_url: str = ""
     runpod_webhook_secret: str = "dev-secret"
 
+    # Railway (billing)
+    railway_api_token: str = ""
+    railway_project_id: str = ""
+
     # Resend
     resend_api_key: str = ""
     resend_from_email: str = "noreply@tools.soexcellence.com"

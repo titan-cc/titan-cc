@@ -179,3 +179,26 @@ class UpdateUserRequest(BaseModel):
     role: str | None = None          # 'user' | 'admin'
     is_enabled: bool | None = None
     access_level: str | None = None  # 'basic' | 'standard' | 'pro' | 'enterprise'
+
+
+# ── Billing ────────────────────────────────────────────────────────────────────
+
+class BillingLineItem(BaseModel):
+    label: str
+    amount_usd: float
+
+
+class ProviderBilling(BaseModel):
+    provider: str
+    period: str
+    total_usd: float | None = None
+    items: list[BillingLineItem] = []
+    meta: dict[str, Any] = {}
+    error: str | None = None
+
+
+class BillingResponse(BaseModel):
+    period: str
+    runpod: ProviderBilling
+    railway: ProviderBilling
+    aws: ProviderBilling

@@ -1,12 +1,14 @@
 import { SignedIn, SignedOut, RedirectToSignIn } from "@clerk/clerk-react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import Layout from "./components/Layout";
+import AdminLayout from "./components/AdminLayout";
 import Upload from "./pages/Upload";
 import Jobs from "./pages/Jobs";
 import JobDetail from "./pages/JobDetail";
 import Failures from "./pages/Failures";
 import TranscriptViewer from "./pages/TranscriptViewer";
-import Admin from "./pages/Admin";
+import AdminUsers from "./pages/AdminUsers";
+import AdminBilling from "./pages/AdminBilling";
 
 export default function App() {
   return (
@@ -23,7 +25,13 @@ export default function App() {
             <Route path="/jobs/:id" element={<JobDetail />} />
             <Route path="/jobs/:id/transcript" element={<TranscriptViewer />} />
             <Route path="/failures" element={<Failures />} />
-            <Route path="/admin" element={<Admin />} />
+
+            {/* Admin section — sidebar layout */}
+            <Route path="/admin" element={<AdminLayout />}>
+              <Route index element={<Navigate to="/admin/users" replace />} />
+              <Route path="users" element={<AdminUsers />} />
+              <Route path="billing" element={<AdminBilling />} />
+            </Route>
           </Routes>
         </Layout>
       </SignedIn>

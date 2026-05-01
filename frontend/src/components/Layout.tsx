@@ -205,7 +205,7 @@ function useIsAdmin() {
 export default function Layout({ children }: { children: ReactNode }) {
   const isAdmin = useIsAdmin();
   const NAV = isAdmin
-    ? [...BASE_NAV, { to: "/admin", label: "Admin" }]
+    ? [...BASE_NAV, { to: "/admin/users", label: "Admin" }]
     : BASE_NAV;
 
   return (

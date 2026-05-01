@@ -112,3 +112,26 @@ export interface AdminUserListResponse {
   users: AdminUser[];
   next_cursor: string | null;
 }
+
+// ── Billing ───────────────────────────────────────────────────────────────────
+
+export interface BillingLineItem {
+  label: string;
+  amount_usd: number;
+}
+
+export interface ProviderBilling {
+  provider: string;
+  period: string;
+  total_usd: number | null;
+  items: BillingLineItem[];
+  meta: Record<string, string | number>;
+  error: string | null;
+}
+
+export interface BillingResponse {
+  period: string;
+  runpod: ProviderBilling;
+  railway: ProviderBilling;
+  aws: ProviderBilling;
+}
