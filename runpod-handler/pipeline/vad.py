@@ -6,28 +6,38 @@ Raises AUDIO_TOO_QUIET if total detected speech is < MIN_SPEECH_SECONDS.
 
 from __future__ import annotations
 
-import os
+import logging
 from pathlib import Path
 
 from failure_codes import FailureCode, PipelineError
 
+logger = logging.getLogger("titan-handler.vad")
+
 MIN_SPEECH_SECONDS = 2.0
 
-# Cache model across invocations within the same worker process
 _model = None
 _utils = None
 
 
-def _load_model():
+def preload() -> None:
+    """Load VAD model into memory at startup (called before first job)."""
     global _model, _utils
     if _model is None:
         import torch
+        logger.info("loading_silero_vad")
         _model, _utils = torch.hub.load(
             repo_or_dir="snakers4/silero-vad",
             model="silero_vad",
             force_reload=False,
             trust_repo=True,
         )
+        logger.info("silero_vad_loaded")
+
+
+def _load_model():
+    global _model, _utils
+    if _model is None:
+        preload()
     return _model, _utils
 
 

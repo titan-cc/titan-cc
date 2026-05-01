@@ -8,7 +8,6 @@ Error mapping:
 """
 
 import subprocess
-import tempfile
 from pathlib import Path
 
 import boto3
@@ -17,20 +16,25 @@ from botocore.exceptions import ClientError
 from failure_codes import FailureCode, PipelineError
 
 
-def download_and_convert(s3_key: str, bucket: str, s3_client: "boto3.client") -> Path:
+def download_and_convert(
+    s3_key: str,
+    bucket: str,
+    s3_client: "boto3.client",
+    tmp_dir: Path,
+) -> Path:
     """
-    Download s3_key and convert to 16 kHz mono WAV.
-    Returns path to the WAV file (caller is responsible for cleanup).
+    Download s3_key into tmp_dir and convert to 16 kHz mono WAV.
+    Both the raw download and the WAV live inside tmp_dir so the caller's
+    cleanup (shutil.rmtree) handles everything with no leaks.
+    Returns path to the WAV file.
     """
     suffix = Path(s3_key).suffix or ".bin"
-    tmp_input = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
-    tmp_wav = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
-    tmp_input.close()
-    tmp_wav.close()
+    tmp_input = tmp_dir / f"input{suffix}"
+    tmp_wav = tmp_dir / "audio.wav"
 
     # 1. Download
     try:
-        s3_client.download_file(bucket, s3_key, tmp_input.name)
+        s3_client.download_file(bucket, s3_key, str(tmp_input))
     except ClientError as exc:
         raise PipelineError(
             FailureCode.S3_DOWNLOAD_FAILED,
@@ -43,11 +47,11 @@ def download_and_convert(s3_key: str, bucket: str, s3_client: "boto3.client") ->
         result = subprocess.run(
             [
                 "ffmpeg", "-y",
-                "-i", tmp_input.name,
+                "-i", str(tmp_input),
                 "-ar", "16000",
                 "-ac", "1",
                 "-f", "wav",
-                tmp_wav.name,
+                str(tmp_wav),
             ],
             capture_output=True,
             timeout=600,
@@ -71,4 +75,4 @@ def download_and_convert(s3_key: str, bucket: str, s3_client: "boto3.client") ->
             {"ffmpeg_stderr": stderr[:500]},
         )
 
-    return Path(tmp_wav.name)
+    return tmp_wav
