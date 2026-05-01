@@ -224,7 +224,7 @@ export default function Upload() {
           s3_key,
           filename: file.name,
           duration_seconds: durationSeconds,
-          config: { language: "auto", enable_diarization: false, output_formats: ["json", "srt", "txt"] },
+          config: { language: "en", enable_diarization: false, output_formats: ["json", "srt", "txt"] },
         }),
       });
       const job = (await jobRes.json()) as Job;
