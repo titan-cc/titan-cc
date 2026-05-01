@@ -6,6 +6,7 @@ import Jobs from "./pages/Jobs";
 import JobDetail from "./pages/JobDetail";
 import Failures from "./pages/Failures";
 import TranscriptViewer from "./pages/TranscriptViewer";
+import Admin from "./pages/Admin";
 
 export default function App() {
   return (
@@ -22,6 +23,7 @@ export default function App() {
             <Route path="/jobs/:id" element={<JobDetail />} />
             <Route path="/jobs/:id/transcript" element={<TranscriptViewer />} />
             <Route path="/failures" element={<Failures />} />
+            <Route path="/admin" element={<Admin />} />
           </Routes>
         </Layout>
       </SignedIn>

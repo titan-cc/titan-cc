@@ -35,6 +35,8 @@ class Settings(BaseSettings):
     app_env: str = "development"
     api_base_url: str = "http://localhost:8000"
     cors_origins: list[str] = ["http://localhost:5173", "https://tools.soexcellence.com"]
+    # Comma-separated emails that get role='admin' on first sign-in
+    admin_emails: list[str] = []
 
 
 settings = Settings()

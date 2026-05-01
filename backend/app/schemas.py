@@ -147,7 +147,35 @@ class UserMeResponse(BaseModel):
     id: uuid.UUID
     email: str
     plan: str
+    role: str
+    is_enabled: bool
+    access_level: str
     created_at: datetime
     quota: QuotaResponse | None
 
     model_config = {"from_attributes": True}
+
+
+# ── Admin ──────────────────────────────────────────────────────────────────────
+
+class AdminUserResponse(BaseModel):
+    id: uuid.UUID
+    email: str
+    plan: str
+    role: str
+    is_enabled: bool
+    access_level: str
+    created_at: datetime
+    quota: QuotaResponse | None
+    job_count: int
+
+
+class AdminUserListResponse(BaseModel):
+    users: list[AdminUserResponse]
+    next_cursor: uuid.UUID | None
+
+
+class UpdateUserRequest(BaseModel):
+    role: str | None = None          # 'user' | 'admin'
+    is_enabled: bool | None = None
+    access_level: str | None = None  # 'basic' | 'standard' | 'pro' | 'enterprise'

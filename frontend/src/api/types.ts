@@ -71,6 +71,9 @@ export interface NotificationListResponse {
   notifications: Notification[];
 }
 
+export type UserRole = "user" | "admin";
+export type AccessLevel = "basic" | "standard" | "pro" | "enterprise";
+
 export interface User {
   id: string;
   email: string;
@@ -87,5 +90,25 @@ export interface QuotaResponse {
 }
 
 export interface UserMeResponse extends User {
+  role: UserRole;
+  is_enabled: boolean;
+  access_level: AccessLevel;
   quota: QuotaResponse | null;
+}
+
+export interface AdminUser {
+  id: string;
+  email: string;
+  plan: string;
+  role: UserRole;
+  is_enabled: boolean;
+  access_level: AccessLevel;
+  created_at: string;
+  quota: QuotaResponse | null;
+  job_count: number;
+}
+
+export interface AdminUserListResponse {
+  users: AdminUser[];
+  next_cursor: string | null;
 }

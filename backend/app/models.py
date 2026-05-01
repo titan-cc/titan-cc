@@ -49,6 +49,9 @@ class User(Base):
     clerk_user_id: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
     email: Mapped[str] = mapped_column(Text, nullable=False)
     plan: Mapped[str] = mapped_column(Text, nullable=False, default="free")
+    role: Mapped[str] = mapped_column(Text, nullable=False, default="user")
+    is_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    access_level: Mapped[str] = mapped_column(Text, nullable=False, default="basic")
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMPTZ, nullable=False, server_default=func.now()
     )

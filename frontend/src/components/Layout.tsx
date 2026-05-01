@@ -4,7 +4,7 @@ import { UserButton, useAuth } from "@clerk/clerk-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { apiFetch } from "@/api/client";
-import type { Notification, NotificationListResponse } from "@/api/types";
+import type { Notification, NotificationListResponse, UserMeResponse } from "@/api/types";
 
 function BellIcon() {
   return (
@@ -182,13 +182,32 @@ function NotificationBell() {
   );
 }
 
-const NAV = [
+const BASE_NAV = [
   { to: "/upload",   label: "Upload"   },
   { to: "/jobs",     label: "Jobs"     },
   { to: "/failures", label: "Failures" },
 ];
 
+function useIsAdmin() {
+  const { getToken } = useAuth();
+  const { data } = useQuery<UserMeResponse>({
+    queryKey: ["me"],
+    queryFn: async () => {
+      const token = await getToken();
+      const res = await apiFetch("/users/me", { token: token! });
+      return res.json();
+    },
+    staleTime: 60_000,
+  });
+  return data?.role === "admin";
+}
+
 export default function Layout({ children }: { children: ReactNode }) {
+  const isAdmin = useIsAdmin();
+  const NAV = isAdmin
+    ? [...BASE_NAV, { to: "/admin", label: "Admin" }]
+    : BASE_NAV;
+
   return (
     <div className="min-h-[100dvh]" style={{ backgroundColor: "var(--surface-subtle)" }}>
       <header
@@ -213,7 +232,7 @@ export default function Layout({ children }: { children: ReactNode }) {
 
             {/* Nav links */}
             <nav className="flex items-center gap-0.5">
-              {NAV.map(({ to, label }) => (
+              {NAV.map(({ to, label }: { to: string; label: string }) => (
                 <NavLink
                   key={to}
                   to={to}

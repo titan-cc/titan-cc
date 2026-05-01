@@ -9,6 +9,7 @@ from sqlalchemy.orm import selectinload
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.auth import verify_clerk_jwt
+from app.config import settings
 from app.db import get_db
 from app.models import Quota, User
 
@@ -36,6 +37,21 @@ async def get_current_user(
         await db.commit()
         await db.refresh(user)
 
+    if not user.is_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Your account has been disabled. Contact support.",
+        )
+
+    return user
+
+
+async def require_admin(user: User = Depends(get_current_user)) -> User:
+    if user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required.",
+        )
     return user
 
 
@@ -45,8 +61,10 @@ async def _create_user(db: AsyncSession, clerk_user_id: str, email: str) -> User
         day=1, hour=0, minute=0, second=0, microsecond=0
     )
 
+    role = "admin" if email.lower() in [e.lower() for e in settings.admin_emails] else "user"
+
     try:
-        user = User(clerk_user_id=clerk_user_id, email=email)
+        user = User(clerk_user_id=clerk_user_id, email=email, role=role)
         db.add(user)
         await db.flush()
         db.add(Quota(user_id=user.id, quota_reset_at=quota_reset_at))
