@@ -31,6 +31,7 @@ export interface Job {
   failure_message: string | null;
   retry_count: number;
   created_at: string;
+  dispatched_at: string | null;
   started_at: string | null;
   completed_at: string | null;
   expires_at: string;

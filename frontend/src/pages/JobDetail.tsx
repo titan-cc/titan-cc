@@ -159,6 +159,125 @@ function CancelButton({ jobId }: { jobId: string }) {
   );
 }
 
+function elapsedSecs(a: string, b: string | null | undefined): string {
+  const end = b ? new Date(b) : new Date();
+  const secs = Math.round((end.getTime() - new Date(a).getTime()) / 1000);
+  if (secs < 60) return `${secs}s`;
+  const m = Math.floor(secs / 60), s = secs % 60;
+  return `${m}m ${s}s`;
+}
+
+function TimelineDot({ done, active }: { done: boolean; active?: boolean }) {
+  return (
+    <div
+      className="w-2.5 h-2.5 rounded-full shrink-0 mt-0.5"
+      style={{
+        backgroundColor: done ? "var(--brand)" : active ? "var(--brand)" : "var(--border)",
+        boxShadow: active ? "0 0 0 3px var(--brand-tint)" : undefined,
+        opacity: done || active ? 1 : 0.4,
+      }}
+    />
+  );
+}
+
+function JobTimeline({ job }: { job: Job }) {
+  const terminal = ["completed", "failed", "cancelled"].includes(job.status);
+  const steps: { key: string; label: string; ts: string | null; active: boolean }[] = [
+    {
+      key: "queued",
+      label: "Queued",
+      ts: job.created_at,
+      active: job.status === "queued",
+    },
+    {
+      key: "dispatched",
+      label: "Sent to GPU",
+      ts: job.dispatched_at ?? null,
+      active: job.status === "dispatched",
+    },
+    {
+      key: "processing",
+      label: "Processing",
+      ts: job.started_at ?? null,
+      active: job.status === "processing",
+    },
+    {
+      key: "done",
+      label: job.status === "failed" ? "Failed" : job.status === "cancelled" ? "Cancelled" : "Completed",
+      ts: job.completed_at ?? null,
+      active: false,
+    },
+  ];
+
+  return (
+    <div className="mt-5 pt-4" style={{ borderTop: "1px solid var(--border)" }}>
+      <p className="text-[10px] font-semibold uppercase tracking-widest mb-3" style={{ color: "var(--text-tertiary)" }}>
+        Timeline
+      </p>
+      <div className="flex flex-col gap-0">
+        {steps.map((step, i) => {
+          const done = !!step.ts && (terminal || i < steps.findIndex(s => s.active || !s.ts));
+          const isDone = !!step.ts;
+          const prev = i > 0 ? steps[i - 1] : null;
+          const elapsed = isDone && prev?.ts ? elapsedSecs(prev.ts, step.ts) : null;
+          const waiting = step.active && prev?.ts ? elapsedSecs(prev.ts, null) : null;
+
+          return (
+            <div key={step.key} className="flex gap-3">
+              {/* spine */}
+              <div className="flex flex-col items-center" style={{ width: 10 }}>
+                <TimelineDot done={isDone} active={step.active} />
+                {i < steps.length - 1 && (
+                  <div
+                    className="w-px flex-1 my-0.5"
+                    style={{
+                      backgroundColor: isDone ? "var(--brand)" : "var(--border)",
+                      opacity: isDone ? 0.5 : 0.3,
+                      minHeight: 20,
+                    }}
+                  />
+                )}
+              </div>
+
+              {/* content */}
+              <div className="pb-3 flex-1 min-w-0">
+                <div className="flex items-baseline justify-between gap-2">
+                  <span
+                    className="text-sm font-medium"
+                    style={{ color: isDone || step.active ? "var(--text-primary)" : "var(--text-tertiary)" }}
+                  >
+                    {step.label}
+                  </span>
+                  {isDone && (
+                    <span className="text-[11px] font-mono tabular-nums shrink-0" style={{ color: "var(--text-tertiary)" }}>
+                      {new Date(step.ts!).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                    </span>
+                  )}
+                  {!isDone && step.active && (
+                    <span className="text-[11px] font-mono tabular-nums shrink-0" style={{ color: "var(--brand)" }}>
+                      now
+                    </span>
+                  )}
+                </div>
+                {elapsed && (
+                  <p className="text-[11px] mt-0.5" style={{ color: "var(--text-tertiary)" }}>
+                    +{elapsed} from previous
+                  </p>
+                )}
+                {waiting && (
+                  <p className="text-[11px] mt-0.5" style={{ color: "var(--brand)" }}>
+                    {waiting} and counting…
+                  </p>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export default function JobDetail() {
   const { id } = useParams<{ id: string }>();
   const { getToken } = useAuth();
@@ -287,10 +406,10 @@ export default function JobDetail() {
         )}
         <MetaRow label="Duration" value={formatDuration(job.input_duration_seconds)} />
         <MetaRow label="Retries" value={job.retry_count} />
-        <MetaRow label="Created" value={formatDate(job.created_at)} />
-        {job.started_at && <MetaRow label="Started" value={formatDate(job.started_at)} />}
-        {job.completed_at && <MetaRow label="Completed" value={formatDate(job.completed_at)} />}
         <MetaRow label="Expires" value={formatDate(job.expires_at)} />
+
+        {/* Timeline */}
+        <JobTimeline job={job} />
       </div>
 
       {/* View Transcript + Downloads */}

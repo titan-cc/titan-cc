@@ -52,6 +52,7 @@ class JobResponse(BaseModel):
     failure_message: str | None
     retry_count: int
     created_at: datetime
+    dispatched_at: datetime | None
     started_at: datetime | None
     completed_at: datetime | None
     expires_at: datetime
