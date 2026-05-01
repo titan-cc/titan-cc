@@ -9,15 +9,19 @@ ENV DEBIAN_FRONTEND=noninteractive \
     LD_LIBRARY_PATH=/usr/local/cuda/lib64:${LD_LIBRARY_PATH}
 
 # ── System packages ────────────────────────────────────────────────────────────
+# python3.12 isn't in Ubuntu 22.04 default repos — add deadsnakes PPA first
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        python3.12 python3.12-dev python3-pip \
+        software-properties-common \
+    && add-apt-repository ppa:deadsnakes/ppa \
+    && apt-get update && apt-get install -y --no-install-recommends \
+        python3.12 python3.12-dev python3.12-distutils \
         ffmpeg \
         git \
         curl \
+    && curl -sS https://bootstrap.pypa.io/get-pip.py | python3.12 \
     && rm -rf /var/lib/apt/lists/* \
     && ln -sf /usr/bin/python3.12 /usr/bin/python3 \
-    && ln -sf /usr/bin/python3 /usr/bin/python \
-    && ln -sf /usr/bin/pip3 /usr/bin/pip
+    && ln -sf /usr/bin/python3 /usr/bin/python
 
 # ── Python packages ────────────────────────────────────────────────────────────
 WORKDIR /app
