@@ -17,7 +17,7 @@ def _load_model():
     global _MODEL
     if _MODEL is None:
         from faster_whisper import WhisperModel
-        _MODEL = WhisperModel("medium", device="cuda", compute_type="float16")
+        _MODEL = WhisperModel("large-v3", device="cuda", compute_type="float16")
     return _MODEL
 
 
@@ -39,7 +39,13 @@ def transcribe(
             str(wav_path),
             language=lang,
             word_timestamps=True,
-            vad_filter=False,  # VAD already done upstream
+            vad_filter=False,          # VAD already done upstream
+            beam_size=5,
+            best_of=5,
+            temperature=0,             # greedy — no random sampling, more consistent
+            condition_on_previous_text=True,  # helps coherence on long files
+            no_speech_threshold=0.6,
+            log_prob_threshold=-1.0,
         )
         result = []
         for seg in segments_iter:

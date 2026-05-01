@@ -30,8 +30,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # HF_HUB_OFFLINE=0 overrides the ENV so the download can actually happen here.
 RUN HF_HUB_OFFLINE=0 python -c "\
 from faster_whisper import WhisperModel; \
-WhisperModel('medium', device='cpu', compute_type='int8'); \
-print('Whisper medium baked OK')"
+WhisperModel('large-v3', device='cpu', compute_type='int8'); \
+print('Whisper large-v3 baked OK')"
 
 # ── Bake Silero VAD ────────────────────────────────────────────────────────────
 RUN python -c "\
