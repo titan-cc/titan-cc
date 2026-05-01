@@ -94,6 +94,7 @@ class Job(Base):
         Enum(JobStatus, name="job_status"), nullable=False, default=JobStatus.queued
     )
     claim_token: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    runpod_job_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     input_s3_key: Mapped[str] = mapped_column(Text, nullable=False)
     input_filename: Mapped[str | None] = mapped_column(Text, nullable=True)
     input_hash: Mapped[str | None] = mapped_column(Text, nullable=True)

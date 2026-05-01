@@ -75,7 +75,7 @@ async def _fetch_runpod() -> ProviderBilling:
     query = """
     {
       myself {
-        creditBalance
+        clientBalance
         spendLimit
         currentSpendPerHr
         serverlessDiscount { discountFactor }
@@ -85,15 +85,18 @@ async def _fetch_runpod() -> ProviderBilling:
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             r = await client.post(
-                "https://api.runpod.io/graphql",
-                headers={"Authorization": f"Bearer {settings.runpod_api_key}"},
+                f"https://api.runpod.io/graphql?api_key={settings.runpod_api_key}",
                 json={"query": query},
             )
             r.raise_for_status()
             data = r.json()
 
+        if data.get("errors"):
+            err_msg = data["errors"][0].get("message", "GraphQL error")
+            return ProviderBilling(provider="runpod", period=period, error=err_msg)
+
         myself = data.get("data", {}).get("myself") or {}
-        credit_balance = float(myself.get("creditBalance") or 0)
+        credit_balance = float(myself.get("clientBalance") or 0)
         spend_limit = float(myself.get("spendLimit") or 0)
         current_per_hr = float(myself.get("currentSpendPerHr") or 0)
         discount = myself.get("serverlessDiscount") or {}
@@ -407,9 +410,11 @@ async def reset_stuck_dispatched_jobs(
         )
     )
     jobs = result.scalars().all()
+    runpod_ids = [j.runpod_job_id for j in jobs if j.runpod_job_id]
     for job in jobs:
         job.status = JobStatus.queued
         job.claim_token = None
+        job.runpod_job_id = None
         job.dispatched_at = None
         job.updated_at = datetime.now(UTC)
         db.add(JobEvent(
@@ -419,5 +424,10 @@ async def reset_stuck_dispatched_jobs(
             to_status=JobStatus.queued,
         ))
     await db.commit()
+
+    if runpod_ids:
+        from app.services.runpod import cancel_runpod_job
+        await asyncio.gather(*[cancel_runpod_job(rid) for rid in runpod_ids], return_exceptions=True)
+
     logger.info("admin_reset_dispatched", count=len(jobs))
     return {"reset": len(jobs), "job_ids": [str(j.id) for j in jobs]}

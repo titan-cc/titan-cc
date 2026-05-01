@@ -244,8 +244,11 @@ async def cancel_job(
         )
 
     prior_status = job.status
+    runpod_job_id = job.runpod_job_id
+
     job.status = JobStatus.cancelled
     job.claim_token = None  # invalidate so any in-flight worker webhook is rejected
+    job.runpod_job_id = None
     job.updated_at = datetime.now(UTC)
 
     db.add(JobEvent(
@@ -255,4 +258,10 @@ async def cancel_job(
 
     await db.commit()
     await db.refresh(job)
+
+    # Best-effort cancel on RunPod — after DB commit so our state is consistent regardless
+    if runpod_job_id:
+        from app.services.runpod import cancel_runpod_job
+        await cancel_runpod_job(runpod_job_id)
+
     return JobResponse.model_validate(job)

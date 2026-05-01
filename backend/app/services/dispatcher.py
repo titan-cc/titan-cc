@@ -9,11 +9,11 @@ so multiple server instances won't double-dispatch the same job.
 import asyncio
 
 import structlog
-from sqlalchemy import text
+from sqlalchemy import text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import async_session_factory
-from app.models import JobEvent, JobStatus
+from app.models import Job, JobEvent, JobStatus
 from app.services.runpod import dispatch_job
 
 logger = structlog.get_logger()
@@ -56,7 +56,14 @@ async def _tick(db: AsyncSession) -> None:
     await db.commit()
 
     logger.info("dispatcher_claimed", job_id=str(job_id))
-    await dispatch_job(job_id, claim_token, s3_key, config)
+    runpod_job_id = await dispatch_job(job_id, claim_token, s3_key, config)
+
+    if runpod_job_id:
+        async with async_session_factory() as db2:
+            await db2.execute(
+                update(Job).where(Job.id == job_id).values(runpod_job_id=runpod_job_id)
+            )
+            await db2.commit()
 
 
 async def run_dispatcher() -> None:
