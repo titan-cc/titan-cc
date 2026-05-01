@@ -1,36 +1,31 @@
 # Titan CC — RunPod GPU transcription worker
-# Base: CUDA 12.1 + cuDNN 8 runtime on Ubuntu 22.04
-FROM nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
+# Base: CUDA 12.4 + cuDNN runtime on Ubuntu 24.04 (Python 3.12 in default repos)
+FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu24.04
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    # faster-whisper uses ctranslate2 which looks for CUDA libs here
     LD_LIBRARY_PATH=/usr/local/cuda/lib64:${LD_LIBRARY_PATH}
 
 # ── System packages ────────────────────────────────────────────────────────────
-# python3.12 isn't in Ubuntu 22.04 default repos — add deadsnakes PPA first
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        software-properties-common \
-    && add-apt-repository ppa:deadsnakes/ppa \
-    && apt-get update && apt-get install -y --no-install-recommends \
-        python3.12 python3.12-dev python3.12-distutils \
+        python3.12 python3.12-dev python3-pip \
         ffmpeg \
         git \
         curl \
-    && curl -sS https://bootstrap.pypa.io/get-pip.py | python3.12 \
     && rm -rf /var/lib/apt/lists/* \
     && ln -sf /usr/bin/python3.12 /usr/bin/python3 \
-    && ln -sf /usr/bin/python3 /usr/bin/python
+    && ln -sf /usr/bin/python3 /usr/bin/python \
+    && ln -sf /usr/bin/pip3 /usr/bin/pip
 
 # ── Python packages ────────────────────────────────────────────────────────────
 WORKDIR /app
 COPY requirements.txt .
 
-# Install PyTorch (CUDA 12.1 wheel) first so faster-whisper links the GPU build
+# Install PyTorch (CUDA 12.4 wheel) first so faster-whisper links the GPU build
 RUN pip install --no-cache-dir \
         torch==2.3.1 torchaudio==2.3.1 \
-        --index-url https://download.pytorch.org/whl/cu121
+        --index-url https://download.pytorch.org/whl/cu124
 
 RUN pip install --no-cache-dir -r requirements.txt
 
