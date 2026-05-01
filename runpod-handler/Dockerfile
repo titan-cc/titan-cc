@@ -25,13 +25,13 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # ── Bake Whisper large-v3 into image ───────────────────────────────────────────
-# Download the float16 model files directly from HuggingFace via snapshot_download.
-# This avoids CTranslate2's CPU float16 restriction on build nodes while still
-# caching the weights in float16 format. At runtime, WhisperModel finds the cached
-# float16 files and loads them straight to GPU — no int8 dequantization overhead.
+# Use WhisperModel (not snapshot_download) so the model is cached in exactly the
+# path and format that faster-whisper expects at runtime with HF_HUB_OFFLINE=1.
+# CPU/int8 works on build nodes; the weights are loaded as float16 on the GPU
+# at runtime directly from the ctranslate2 cache — no re-download needed.
 RUN HF_HUB_OFFLINE=0 python -c "\
-from huggingface_hub import snapshot_download; \
-snapshot_download('Systran/faster-whisper-large-v3'); \
+from faster_whisper import WhisperModel; \
+WhisperModel('large-v3', device='cpu', compute_type='int8'); \
 print('Whisper large-v3 baked OK')"
 
 # ── Bake Silero VAD ────────────────────────────────────────────────────────────
