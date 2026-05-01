@@ -24,13 +24,14 @@ COPY requirements.txt .
 # PyTorch is already in the base image; install only our extras.
 RUN pip install --no-cache-dir -r requirements.txt
 
-# ── Bake Whisper medium into image ─────────────────────────────────────────────
-# Use CPU/int8 during build (no GPU on build nodes); at runtime CTranslate2
-# re-quantises to float16 on the GPU from the same cached weights.
-# HF_HUB_OFFLINE=0 overrides the ENV so the download can actually happen here.
+# ── Bake Whisper large-v3 into image ───────────────────────────────────────────
+# Download the float16 model files directly from HuggingFace via snapshot_download.
+# This avoids CTranslate2's CPU float16 restriction on build nodes while still
+# caching the weights in float16 format. At runtime, WhisperModel finds the cached
+# float16 files and loads them straight to GPU — no int8 dequantization overhead.
 RUN HF_HUB_OFFLINE=0 python -c "\
-from faster_whisper import WhisperModel; \
-WhisperModel('large-v3', device='cpu', compute_type='float16'); \
+from huggingface_hub import snapshot_download; \
+snapshot_download('Systran/faster-whisper-large-v3'); \
 print('Whisper large-v3 baked OK')"
 
 # ── Bake Silero VAD ────────────────────────────────────────────────────────────
