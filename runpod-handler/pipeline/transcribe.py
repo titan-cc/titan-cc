@@ -17,7 +17,7 @@ def _load_model():
     global _MODEL
     if _MODEL is None:
         from faster_whisper import WhisperModel
-        _MODEL = WhisperModel("large-v3", device="cuda", compute_type="float16")
+        _MODEL = WhisperModel("medium", device="cuda", compute_type="float16")
     return _MODEL
 
 

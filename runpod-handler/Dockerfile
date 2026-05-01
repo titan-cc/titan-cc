@@ -24,15 +24,14 @@ COPY requirements.txt .
 # PyTorch is already in the base image; install only our extras.
 RUN pip install --no-cache-dir -r requirements.txt
 
-# ── Bake Whisper large-v3 into image ───────────────────────────────────────────
-# Use WhisperModel (not snapshot_download) so the model is cached in exactly the
-# path and format that faster-whisper expects at runtime with HF_HUB_OFFLINE=1.
-# CPU/int8 works on build nodes; the weights are loaded as float16 on the GPU
-# at runtime directly from the ctranslate2 cache — no re-download needed.
+# ── Bake Whisper medium into image ─────────────────────────────────────────────
+# Medium model (~800 MB) keeps image delta small → ~90s cold start total.
+# Language is fixed to "en" in the frontend so accuracy is on par with large
+# for English-only content. CPU/int8 on build node; float16 on GPU at runtime.
 RUN HF_HUB_OFFLINE=0 python -c "\
 from faster_whisper import WhisperModel; \
-WhisperModel('large-v3', device='cpu', compute_type='int8'); \
-print('Whisper large-v3 baked OK')"
+WhisperModel('medium', device='cpu', compute_type='int8'); \
+print('Whisper medium baked OK')"
 
 # ── Bake Silero VAD ────────────────────────────────────────────────────────────
 RUN python -c "\
