@@ -1,6 +1,6 @@
 # Titan CC — RunPod GPU transcription worker
 # Base: CUDA 12.4 + cuDNN runtime on Ubuntu 24.04 (Python 3.12 in default repos)
-FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu24.04
+FROM nvidia/cuda:12.6.3-cudnn-runtime-ubuntu24.04
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
