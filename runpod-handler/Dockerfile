@@ -34,10 +34,15 @@ WhisperModel('medium', device='cpu', compute_type='int8'); \
 print('Whisper medium baked OK')"
 
 # ── Bake Silero VAD ────────────────────────────────────────────────────────────
+# We then verify the exact cache path so the runtime source="local" load is
+# guaranteed to find the model without any GitHub network call.
 RUN python -c "\
-import torch; \
+import torch, pathlib; \
 torch.hub.load('snakers4/silero-vad', 'silero_vad', trust_repo=True); \
-print('Silero VAD baked OK')"
+hub_dir = pathlib.Path(torch.hub.get_dir()); \
+candidates = [p for b in ('master', 'main') for p in [hub_dir / f'snakers4_silero-vad_{b}'] if (p / 'hubconf.py').exists()]; \
+assert candidates, f'silero-vad cache not found under {hub_dir}'; \
+print('Silero VAD baked OK at', candidates[0])"
 
 # ── App code ───────────────────────────────────────────────────────────────────
 COPY . .

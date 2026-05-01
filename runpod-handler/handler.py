@@ -340,8 +340,14 @@ try:
     _load_whisper()
     logger.info("whisper_model_loaded")
 
-    _warmup_whisper()
-    logger.info("whisper_warmup_complete — worker ready")
+    try:
+        _warmup_whisper()
+        logger.info("whisper_warmup_complete — worker ready")
+    except Exception as _warmup_exc:
+        # Warmup is a performance optimisation, not a correctness requirement.
+        # A failed warmup means the first real job may be slower, but the
+        # worker should still accept jobs rather than crash-looping.
+        logger.warning("warmup_failed (non-fatal, continuing): %s", _warmup_exc)
 
 except Exception as _exc:
     logger.exception("model_preload_failed: %s", _exc)

@@ -19,19 +19,56 @@ _model = None
 _utils = None
 
 
+def _find_silero_local() -> "Path | None":
+    """
+    Return the torch-hub cached path for snakers4/silero-vad, or None.
+
+    torch.hub caches GitHub repos as  $TORCH_HOME/hub/{owner}_{repo}_{branch}/.
+    The model is baked into the Docker image so this path must exist at runtime;
+    using source="local" then skips any GitHub network call entirely.
+    """
+    import torch
+
+    hub_dir = Path(torch.hub.get_dir())
+    for branch in ("master", "main"):
+        candidate = hub_dir / f"snakers4_silero-vad_{branch}"
+        if (candidate / "hubconf.py").exists():
+            return candidate
+    return None
+
+
 def preload() -> None:
     """Load VAD model into memory at startup (called before first job)."""
     global _model, _utils
-    if _model is None:
+    if _model is not None:
+        return
+
+    local_path = _find_silero_local()
+    if local_path:
+        # Offline — baked into the image, no GitHub call needed.
+        logger.info("loading_silero_vad: source=local path=%s", local_path)
         import torch
-        logger.info("loading_silero_vad")
         _model, _utils = torch.hub.load(
-            repo_or_dir="snakers4/silero-vad",
+            repo_or_dir=str(local_path),
             model="silero_vad",
+            source="local",
+            trust_repo=True,
+        )
+    else:
+        # Fallback: model not found in expected cache path; try online.
+        import torch
+        logger.warning(
+            "loading_silero_vad: local cache not found under %s "
+            "— falling back to online download (slow)",
+            torch.hub.get_dir(),
+        )
+        _model, _utils = torch.hub.load(
+            "snakers4/silero-vad",
+            "silero_vad",
             force_reload=False,
             trust_repo=True,
         )
-        logger.info("silero_vad_loaded")
+    logger.info("silero_vad_loaded")
 
 
 def _load_model():
