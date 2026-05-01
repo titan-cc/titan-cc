@@ -32,10 +32,22 @@ async def get_current_user(
 
     if user is None:
         user = await _create_user(db, clerk_user_id, email)
-    elif email and not user.email:
-        user.email = email
-        await db.commit()
-        await db.refresh(user)
+    else:
+        dirty = False
+        if email and not user.email:
+            user.email = email
+            dirty = True
+        # Promote existing users who are now in ADMIN_EMAILS but not yet admin.
+        if (
+            email
+            and user.role != "admin"
+            and email.lower() in [e.lower() for e in settings.admin_emails]
+        ):
+            user.role = "admin"
+            dirty = True
+        if dirty:
+            await db.commit()
+            await db.refresh(user)
 
     if not user.is_enabled:
         raise HTTPException(
