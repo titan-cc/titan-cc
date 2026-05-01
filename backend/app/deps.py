@@ -1,6 +1,7 @@
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime, timedelta
 
+import httpx
 from fastapi import Depends, HTTPException, Security, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -14,6 +15,30 @@ from app.db import get_db
 from app.models import Quota, User
 
 bearer_scheme = HTTPBearer()
+
+
+async def _fetch_email_from_clerk(clerk_user_id: str) -> str:
+    """Fetch primary email from Clerk Users API when not present in JWT."""
+    if not settings.clerk_secret_key:
+        return ""
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            r = await client.get(
+                f"https://api.clerk.com/v1/users/{clerk_user_id}",
+                headers={"Authorization": f"Bearer {settings.clerk_secret_key}"},
+            )
+            if r.status_code == 200:
+                data = r.json()
+                primary_id = data.get("primary_email_address_id")
+                for ea in data.get("email_addresses", []):
+                    if ea.get("id") == primary_id:
+                        return ea.get("email_address", "")
+                emails = data.get("email_addresses", [])
+                if emails:
+                    return emails[0].get("email_address", "")
+    except Exception:
+        pass
+    return ""
 
 
 async def get_current_user(
@@ -31,20 +56,32 @@ async def get_current_user(
     user = result.scalar_one_or_none()
 
     if user is None:
+        # New user — fetch email from Clerk API if JWT didn't include it.
+        if not email:
+            email = await _fetch_email_from_clerk(clerk_user_id)
         user = await _create_user(db, clerk_user_id, email)
     else:
         dirty = False
-        if email and not user.email:
+        # Resolve email: JWT → DB → Clerk API (once, then cached in DB).
+        effective_email = email or user.email
+        if not effective_email:
+            effective_email = await _fetch_email_from_clerk(clerk_user_id)
+            if effective_email:
+                user.email = effective_email
+                dirty = True
+        elif email and not user.email:
             user.email = email
             dirty = True
-        # Promote existing users who are now in ADMIN_EMAILS but not yet admin.
+
+        # Promote existing users in ADMIN_EMAILS who haven't been promoted yet.
         if (
-            email
+            effective_email
             and user.role != "admin"
-            and email.lower() in [e.lower() for e in settings.admin_emails]
+            and effective_email.lower() in [e.lower() for e in settings.admin_emails]
         ):
             user.role = "admin"
             dirty = True
+
         if dirty:
             await db.commit()
             await db.refresh(user)
