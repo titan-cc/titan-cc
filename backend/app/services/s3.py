@@ -15,7 +15,9 @@ ALLOWED_CONTENT_TYPES = frozenset({
     "video/webm", "video/x-matroska",
 })
 
-_PRESIGN_TTL = 300  # 5 minutes
+_PRESIGN_TTL_GET = 300        # 5 minutes — download links
+_PRESIGN_TTL_PUT_MIN = 3600   # 1 hour minimum for uploads
+_BYTES_PER_SECOND = 2_500_000 # assume ~20 Mbps — slow Indian broadband
 
 
 def _client() -> "boto3.client":
@@ -28,25 +30,32 @@ def _client() -> "boto3.client":
     )
 
 
+def _upload_ttl(size_bytes: int) -> int:
+    """TTL long enough to upload size_bytes at assumed minimum bandwidth, minimum 1 hour."""
+    needed = (size_bytes // _BYTES_PER_SECOND) + 300  # transfer time + 5 min buffer
+    return max(_PRESIGN_TTL_PUT_MIN, needed)
+
+
 def presign_put(
     user_id: uuid.UUID,
     filename: str,
     content_type: str,
-    size_bytes: int,  # noqa: ARG001 — validated upstream; stored for future use
+    size_bytes: int,
 ) -> tuple[str, str, datetime]:
     """Return (upload_url, s3_key, expires_at). Content-type is locked into the signed URL."""
     safe = re.sub(r"[^\w.\-]", "_", filename)[:200]
     s3_key = f"inputs/{user_id}/{uuid.uuid4()}/{safe}"
+    ttl = _upload_ttl(size_bytes)
     url = _client().generate_presigned_url(
         "put_object",
         Params={"Bucket": settings.s3_bucket, "Key": s3_key, "ContentType": content_type},
-        ExpiresIn=_PRESIGN_TTL,
+        ExpiresIn=ttl,
     )
-    expires_at = datetime.now(UTC) + timedelta(seconds=_PRESIGN_TTL)
+    expires_at = datetime.now(UTC) + timedelta(seconds=ttl)
     return url, s3_key, expires_at
 
 
-def presign_get(s3_key: str, expires_in: int = _PRESIGN_TTL) -> tuple[str, datetime]:
+def presign_get(s3_key: str, expires_in: int = _PRESIGN_TTL_GET) -> tuple[str, datetime]:
     """Return (download_url, expires_at)."""
     url = _client().generate_presigned_url(
         "get_object",
