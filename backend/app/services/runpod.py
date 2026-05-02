@@ -34,6 +34,7 @@ async def dispatch_job(
             "config": config,
             "webhook_url": f"{settings.api_base_url}/webhooks/runpod",
             "webhook_secret": settings.runpod_webhook_secret,
+            "backend_url": settings.api_base_url,
         }
     }
     try:

@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.deps import get_current_user
 from app.models import User
-from app.routers import admin, jobs, notifications, system, uploads, webhooks
+from app.routers import admin, internal, jobs, notifications, system, uploads, webhooks
 from app.schemas import UserMeResponse
 from app.services.dispatcher import run_dispatcher
 from app.services.watchdog import run_watchdog
@@ -55,6 +55,7 @@ app.include_router(jobs.router, prefix="/jobs", tags=["jobs"])
 app.include_router(notifications.router, prefix="/notifications", tags=["notifications"])
 app.include_router(webhooks.router, prefix="/webhooks", tags=["webhooks"])
 app.include_router(admin.router, prefix="/admin", tags=["admin"])
+app.include_router(internal.router, prefix="/internal", tags=["internal"])
 
 
 @app.get("/healthz")

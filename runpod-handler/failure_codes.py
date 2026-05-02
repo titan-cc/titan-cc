@@ -64,3 +64,8 @@ class PipelineError(Exception):
         self.failure_class = _CLASS_MAP[code]
         self.user_message = _USER_MESSAGES[code]
         self.extra = extra or {}
+
+
+class JobCancelledError(Exception):
+    """Raised when the backend reports the job has been cancelled mid-pipeline.
+    Not a PipelineError — no webhook is sent; the backend already knows."""

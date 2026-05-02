@@ -33,7 +33,7 @@ from pathlib import Path
 import boto3
 from tenacity import retry, stop_after_attempt, wait_exponential
 
-from failure_codes import FailureClass, FailureCode, PipelineError
+from failure_codes import FailureClass, FailureCode, JobCancelledError, PipelineError
 from pipeline.audio import download_and_convert
 from pipeline.vad import get_speech_segments
 from pipeline.transcribe import transcribe
@@ -179,6 +179,38 @@ def _send_failed(
     }, secret)
 
 
+# ── Cancellation polling ───────────────────────────────────────────────────────
+
+def _check_alive(backend_url: str, job_id: str, claim_token: str, secret: str) -> None:
+    """
+    Ask the backend whether this job is still live.
+
+    Raises JobCancelledError immediately if the backend says alive=false
+    (job was cancelled by the user or claim_token no longer matches).
+
+    Network errors are swallowed with a warning — a transient backend
+    hiccup must never kill an otherwise healthy job.
+    """
+    if not backend_url:
+        return
+    import httpx
+    try:
+        url = f"{backend_url}/internal/jobs/{job_id}/alive"
+        with httpx.Client(timeout=5) as client:
+            resp = client.get(
+                url,
+                params={"claim_token": claim_token},
+                headers={"Authorization": f"Bearer {secret}"},
+            )
+            resp.raise_for_status()
+            if not resp.json().get("alive", True):
+                raise JobCancelledError(f"job {job_id} cancelled by user")
+    except JobCancelledError:
+        raise
+    except Exception as exc:
+        logger.warning("alive_check_network_error (non-fatal): job=%s error=%s", job_id, exc)
+
+
 # ── Core handler ───────────────────────────────────────────────────────────────
 
 def handler(job: dict) -> dict:
@@ -195,9 +227,13 @@ def handler(job: dict) -> dict:
     config: dict = inp.get("config", {})
     webhook_url: str = inp["webhook_url"]
     webhook_secret: str = inp["webhook_secret"]
+    backend_url: str = inp.get("backend_url", "")
 
     def progress(stage: str, pct: int) -> None:
         _send_progress(webhook_url, job_id, claim_token, stage, pct, webhook_secret)
+
+    def alive() -> None:
+        _check_alive(backend_url, job_id, claim_token, webhook_secret)
 
     # ── Phase 1: Pipeline ──────────────────────────────────────────────────────
     # Run every stage and record the outcome. No webhook calls happen here.
@@ -206,6 +242,7 @@ def handler(job: dict) -> dict:
     # pipeline result or cause the wrong webhook to be sent.
 
     pipeline_ok = False
+    job_cancelled = False
     completed_payload: dict = {}
     failed_payload: dict = {}
 
@@ -215,17 +252,24 @@ def handler(job: dict) -> dict:
         wav_path = download_and_convert(s3_key, S3_BUCKET, _s3, tmp_dir=tmpdir)
         logger.info("audio_converted: job=%s key=%s", job_id, s3_key)
 
+        alive()  # check after download (can take 10-30s on large files)
+
         progress("vad", 20)
         get_speech_segments(str(wav_path))
         logger.info("vad_ok: job=%s", job_id)
 
+        alive()  # check after VAD
+
         progress("transcribing", 35)
-        segments = transcribe(str(wav_path))
+        segments = transcribe(str(wav_path), cancel_check=alive)
         logger.info("transcribed: job=%s segments=%d", job_id, len(segments))
 
         if config.get("enable_diarization"):
+            alive()  # check before diarization (longest remaining stage)
             progress("diarizing", 70)
             segments = diarize(segments, str(wav_path))
+
+        alive()  # check before upload
 
         progress("formatting", 85)
         output_formats: list[str] = config.get("output_formats", ["json", "srt", "txt"])
@@ -246,6 +290,10 @@ def handler(job: dict) -> dict:
             "cost_usd": 0.0,
             "input_hash": _hash_file(wav_path),
         }
+
+    except JobCancelledError:
+        job_cancelled = True
+        logger.info("job_cancelled_mid_pipeline: job=%s", job_id)
 
     except PipelineError as exc:
         logger.error("pipeline_error: job=%s code=%s msg=%s", job_id, exc.code, exc)
@@ -275,6 +323,10 @@ def handler(job: dict) -> dict:
     # ── Phase 2: Webhook delivery ──────────────────────────────────────────────
     # Each send has its own try/except so a delivery failure falls back to the
     # S3 dead-letter rather than silently dropping the outcome.
+
+    if job_cancelled:
+        # Backend already marked the job cancelled — no webhook needed.
+        return {"status": "cancelled", "job_id": job_id}
 
     if pipeline_ok:
         try:

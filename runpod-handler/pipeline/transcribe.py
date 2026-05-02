@@ -11,6 +11,7 @@ import logging
 import threading
 import wave
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
 
 from failure_codes import FailureCode, PipelineError
@@ -55,9 +56,15 @@ def warmup() -> None:
         tmp_path.unlink(missing_ok=True)
 
 
-def transcribe(wav_path: str | Path) -> list[dict]:
+def transcribe(
+    wav_path: str | Path,
+    cancel_check: Callable[[], None] | None = None,
+) -> list[dict]:
     """
     Transcribe a 16 kHz mono WAV file.
+
+    cancel_check — optional zero-arg callable called every 10 segments.
+    It should raise JobCancelledError to abort mid-transcription.
 
     Returns a list of segment dicts:
       {"start": float, "end": float, "text": str,
@@ -78,7 +85,9 @@ def transcribe(wav_path: str | Path) -> list[dict]:
             log_prob_threshold=-1.0,
         )
         result = []
-        for seg in segments_iter:
+        for i, seg in enumerate(segments_iter):
+            if cancel_check and i % 10 == 0:
+                cancel_check()
             words = []
             if seg.words:
                 words = [
@@ -88,6 +97,9 @@ def transcribe(wav_path: str | Path) -> list[dict]:
             result.append({"start": seg.start, "end": seg.end, "text": seg.text.strip(), "words": words})
         return result
     except Exception as exc:
+        from failure_codes import JobCancelledError
+        if isinstance(exc, JobCancelledError):
+            raise
         msg = str(exc).lower()
         if "out of memory" in msg or "oom" in msg:
             raise PipelineError(FailureCode.GPU_OOM, f"OOM during transcription: {exc}") from exc
