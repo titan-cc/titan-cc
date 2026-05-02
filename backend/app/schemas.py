@@ -92,6 +92,18 @@ class TranscriptResponse(BaseModel):
     video_url: str | None = None
 
 
+class TranscriptSegmentUpdate(BaseModel):
+    start: float
+    end: float
+    text: str
+    speaker: str | None = None
+    words: list[dict] | None = None
+
+
+class TranscriptUpdateRequest(BaseModel):
+    segments: list[TranscriptSegmentUpdate]
+
+
 # ── Notifications ──────────────────────────────────────────────────────────────
 
 class NotificationResponse(BaseModel):

@@ -64,3 +64,13 @@ def presign_get(s3_key: str, expires_in: int = _PRESIGN_TTL_GET) -> tuple[str, d
     )
     expires_at = datetime.now(UTC) + timedelta(seconds=expires_in)
     return url, expires_at
+
+
+def put_bytes(s3_key: str, body: bytes, content_type: str) -> None:
+    """Upload raw bytes directly to an S3 key, overwriting any existing object."""
+    _client().put_object(
+        Bucket=settings.s3_bucket,
+        Key=s3_key,
+        Body=body,
+        ContentType=content_type,
+    )

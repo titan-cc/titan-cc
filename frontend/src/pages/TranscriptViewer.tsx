@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useAuth } from "@clerk/clerk-react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/api/client";
 import type { Job, TranscriptResponse } from "@/api/types";
 
@@ -12,6 +12,7 @@ interface TranscriptSegment {
   end: number;
   text: string;
   speaker?: string;
+  words?: unknown[];
 }
 
 interface TranscriptContent {
@@ -89,14 +90,93 @@ function speakerColour(speaker: string | undefined, allSpeakers: string[]) {
   return SPEAKER_COLOURS[Math.max(idx, 0)];
 }
 
+// ── Inline segment editor ──────────────────────────────────────────────────────
+
+function SegmentEditor({
+  text,
+  saving,
+  onSave,
+  onCancel,
+}: {
+  text: string;
+  saving: boolean;
+  onSave: (newText: string) => void;
+  onCancel: () => void;
+}) {
+  const [value, setValue] = useState(text);
+  const ref = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    ref.current?.focus();
+    // Place cursor at end
+    const len = ref.current?.value.length ?? 0;
+    ref.current?.setSelectionRange(len, len);
+  }, []);
+
+  function handleKeyDown(e: React.KeyboardEvent) {
+    if (e.key === "Escape") { e.preventDefault(); onCancel(); }
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); onSave(value.trim()); }
+  }
+
+  return (
+    <div className="flex-1 min-w-0">
+      <textarea
+        ref={ref}
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={handleKeyDown}
+        rows={Math.max(2, Math.ceil(value.length / 60))}
+        className="w-full text-sm leading-relaxed resize-none rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2"
+        style={{
+          border: "1px solid var(--brand)",
+          color: "var(--text-primary)",
+          backgroundColor: "var(--surface)",
+        }}
+        disabled={saving}
+      />
+      <div className="flex items-center gap-2 mt-1.5">
+        <button
+          onClick={() => onSave(value.trim())}
+          disabled={saving || value.trim() === text.trim()}
+          className="px-3 py-1 rounded-lg text-xs font-medium transition-ui disabled:opacity-40"
+          style={{ backgroundColor: "var(--brand)", color: "#fff" }}
+        >
+          {saving ? "Saving…" : "Save"}
+        </button>
+        <button
+          onClick={onCancel}
+          disabled={saving}
+          className="px-3 py-1 rounded-lg text-xs font-medium transition-ui"
+          style={{ border: "1px solid var(--border)", color: "var(--text-secondary)", backgroundColor: "var(--surface)" }}
+        >
+          Cancel
+        </button>
+        <span className="text-[10px] ml-1" style={{ color: "var(--text-tertiary)" }}>
+          Ctrl+↵ save · Esc cancel
+        </span>
+      </div>
+    </div>
+  );
+}
+
 // ── Player view ────────────────────────────────────────────────────────────────
 
 function PlayerView({
   videoUrl,
   segments,
+  editingIdx,
+  saving,
+  onStartEdit,
+  onSaveEdit,
+  onCancelEdit,
 }: {
   videoUrl: string | null | undefined;
   segments: TranscriptSegment[];
+  editingIdx: number | null;
+  saving: boolean;
+  onStartEdit: (idx: number) => void;
+  onSaveEdit: (idx: number, text: string) => void;
+  onCancelEdit: () => void;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const activeRef = useRef<HTMLDivElement>(null);
@@ -104,7 +184,6 @@ function PlayerView({
 
   const allSpeakers = [...new Set(segments.map((s) => s.speaker).filter(Boolean))] as string[];
 
-  // Find the last segment whose start ≤ currentTime (segments are ordered)
   let activeIdx = -1;
   for (let i = 0; i < segments.length; i++) {
     if (segments[i].start <= currentTime) activeIdx = i;
@@ -150,25 +229,34 @@ function PlayerView({
         <div className="p-3 space-y-0.5">
           {segments.map((seg, i) => {
             const isActive = i === activeIdx;
+            const isEditing = editingIdx === i;
             const colour = speakerColour(seg.speaker, allSpeakers);
             return (
               <div
                 key={i}
                 ref={isActive ? activeRef : null}
-                onClick={() => seekTo(seg.start)}
-                className="px-3 py-2 rounded-xl cursor-pointer transition-ui select-none border"
+                className="group px-3 py-2 rounded-xl border transition-ui"
                 style={
-                  isActive
+                  isEditing
+                    ? { backgroundColor: "var(--surface-raised)", borderColor: "var(--brand-tint)" }
+                    : isActive
                     ? { backgroundColor: "var(--brand-subtle)", borderColor: "var(--brand-tint)" }
                     : { borderColor: "transparent" }
                 }
-                onMouseEnter={(e) => { if (!isActive) (e.currentTarget as HTMLElement).style.backgroundColor = "var(--surface-raised)"; }}
-                onMouseLeave={(e) => { if (!isActive) (e.currentTarget as HTMLElement).style.backgroundColor = ""; }}
+                onMouseEnter={(e) => { if (!isActive && !isEditing) (e.currentTarget as HTMLElement).style.backgroundColor = "var(--surface-raised)"; }}
+                onMouseLeave={(e) => { if (!isActive && !isEditing) (e.currentTarget as HTMLElement).style.backgroundColor = ""; }}
               >
                 <div className="flex items-start gap-2.5">
-                  <span className="text-[11px] font-mono shrink-0 pt-0.5 tabular-nums w-10" style={{ color: "var(--text-tertiary)" }}>
+                  {/* Timestamp — click to seek */}
+                  <button
+                    onClick={() => !isEditing && seekTo(seg.start)}
+                    className="text-[11px] font-mono shrink-0 pt-0.5 tabular-nums w-10 text-left"
+                    style={{ color: "var(--text-tertiary)" }}
+                    title="Seek to this position"
+                  >
                     {fmtTime(seg.start)}
-                  </span>
+                  </button>
+
                   <div className="flex-1 min-w-0">
                     {seg.speaker && (
                       <span
@@ -179,13 +267,41 @@ function PlayerView({
                         {seg.speaker.replace("SPEAKER_", "S")}
                       </span>
                     )}
-                    <span
-                      className="text-sm leading-relaxed"
-                      style={{ color: isActive ? "var(--text-primary)" : "var(--text-secondary)", fontWeight: isActive ? 500 : 400 }}
-                    >
-                      {seg.text}
-                    </span>
+
+                    {isEditing ? (
+                      <SegmentEditor
+                        text={seg.text}
+                        saving={saving}
+                        onSave={(newText) => onSaveEdit(i, newText)}
+                        onCancel={onCancelEdit}
+                      />
+                    ) : (
+                      <span
+                        className="text-sm leading-relaxed"
+                        style={{
+                          color: isActive ? "var(--text-primary)" : "var(--text-secondary)",
+                          fontWeight: isActive ? 500 : 400,
+                        }}
+                      >
+                        {seg.text}
+                      </span>
+                    )}
                   </div>
+
+                  {/* Edit pencil — only visible on hover, hidden while editing */}
+                  {!isEditing && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); onStartEdit(i); }}
+                      className="opacity-0 group-hover:opacity-100 shrink-0 p-1 rounded-lg transition-ui"
+                      style={{ color: "var(--text-tertiary)" }}
+                      title="Edit segment"
+                    >
+                      <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                          d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                      </svg>
+                    </button>
+                  )}
                 </div>
               </div>
             );
@@ -212,7 +328,6 @@ function TextView({ segments }: { segments: TranscriptSegment[] }) {
 
   return (
     <div className="max-w-2xl">
-      {/* Search bar */}
       <div className="mb-4 flex items-center gap-3">
         <div className="relative flex-1">
           <svg
@@ -222,12 +337,8 @@ function TextView({ segments }: { segments: TranscriptSegment[] }) {
             viewBox="0 0 24 24"
             stroke="currentColor"
           >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-            />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+              d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
           </svg>
           <input
             type="text"
@@ -249,7 +360,6 @@ function TextView({ segments }: { segments: TranscriptSegment[] }) {
         )}
       </div>
 
-      {/* Text content */}
       <div className="rounded-2xl p-6 shadow-card text-sm leading-loose"
         style={{ backgroundColor: "var(--surface)", border: "1px solid var(--border)", color: "var(--text-secondary)" }}>
         {parts.map((chunk, i) =>
@@ -268,7 +378,21 @@ function TextView({ segments }: { segments: TranscriptSegment[] }) {
 
 // ── Speaker view ───────────────────────────────────────────────────────────────
 
-function SpeakerView({ segments }: { segments: TranscriptSegment[] }) {
+function SpeakerView({
+  segments,
+  editingIdx,
+  saving,
+  onStartEdit,
+  onSaveEdit,
+  onCancelEdit,
+}: {
+  segments: TranscriptSegment[];
+  editingIdx: number | null;
+  saving: boolean;
+  onStartEdit: (idx: number) => void;
+  onSaveEdit: (idx: number, text: string) => void;
+  onCancelEdit: () => void;
+}) {
   const allSpeakers = [...new Set(segments.map((s) => s.speaker).filter(Boolean))] as string[];
 
   if (allSpeakers.length === 0) {
@@ -285,27 +409,27 @@ function SpeakerView({ segments }: { segments: TranscriptSegment[] }) {
     );
   }
 
-  // Merge consecutive segments from the same speaker
-  const groups: { speaker: string; segs: TranscriptSegment[] }[] = [];
-  for (const seg of segments) {
+  // Merge consecutive segments from the same speaker (keep original indices)
+  const groups: { speaker: string; segs: { idx: number; seg: TranscriptSegment }[] }[] = [];
+  segments.forEach((seg, idx) => {
     const spk = seg.speaker ?? "Unknown";
     const last = groups[groups.length - 1];
     if (last && last.speaker === spk) {
-      last.segs.push(seg);
+      last.segs.push({ idx, seg });
     } else {
-      groups.push({ speaker: spk, segs: [seg] });
+      groups.push({ speaker: spk, segs: [{ idx, seg }] });
     }
-  }
+  });
 
   return (
     <div className="max-w-2xl space-y-3">
-      {groups.map((g, i) => {
+      {groups.map((g, gi) => {
         const colour = speakerColour(g.speaker, allSpeakers);
-        const start = g.segs[0].start;
-        const end = g.segs[g.segs.length - 1].end;
+        const start = g.segs[0].seg.start;
+        const end = g.segs[g.segs.length - 1].seg.end;
         return (
           <div
-            key={i}
+            key={gi}
             className="rounded-2xl p-4 shadow-card"
             style={{ backgroundColor: "var(--surface)", border: "1px solid var(--border)" }}
           >
@@ -321,9 +445,37 @@ function SpeakerView({ segments }: { segments: TranscriptSegment[] }) {
                 {fmtTime(start)} → {fmtTime(end)}
               </span>
             </div>
-            <p className="text-sm leading-relaxed" style={{ color: "var(--text-secondary)" }}>
-              {g.segs.map((s) => s.text).join(" ")}
-            </p>
+            <div className="space-y-1.5">
+              {g.segs.map(({ idx, seg }) => (
+                <div key={idx} className="group flex items-start gap-2">
+                  {editingIdx === idx ? (
+                    <SegmentEditor
+                      text={seg.text}
+                      saving={saving}
+                      onSave={(newText) => onSaveEdit(idx, newText)}
+                      onCancel={onCancelEdit}
+                    />
+                  ) : (
+                    <>
+                      <span className="text-sm leading-relaxed flex-1" style={{ color: "var(--text-secondary)" }}>
+                        {seg.text}
+                      </span>
+                      <button
+                        onClick={() => onStartEdit(idx)}
+                        className="opacity-0 group-hover:opacity-100 shrink-0 p-1 rounded-lg transition-ui mt-0.5"
+                        style={{ color: "var(--text-tertiary)" }}
+                        title="Edit segment"
+                      >
+                        <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                            d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                        </svg>
+                      </button>
+                    </>
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
         );
       })}
@@ -348,12 +500,33 @@ function Skeleton() {
   );
 }
 
+// ── Save toast ─────────────────────────────────────────────────────────────────
+
+function SavedBadge({ visible }: { visible: boolean }) {
+  if (!visible) return null;
+  return (
+    <span
+      className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium"
+      style={{ backgroundColor: "#e8f5eb", color: "#14732C" }}
+    >
+      <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+      </svg>
+      Saved
+    </span>
+  );
+}
+
 // ── Main component ─────────────────────────────────────────────────────────────
 
 export default function TranscriptViewer() {
   const { id } = useParams<{ id: string }>();
   const { getToken } = useAuth();
+  const queryClient = useQueryClient();
   const [tab, setTab] = useState<Tab>("player");
+  const [localSegments, setLocalSegments] = useState<TranscriptSegment[]>([]);
+  const [editingIdx, setEditingIdx] = useState<number | null>(null);
+  const [savedVisible, setSavedVisible] = useState(false);
 
   const { data: job } = useQuery<Job>({
     queryKey: ["job", id],
@@ -389,8 +562,53 @@ export default function TranscriptViewer() {
     gcTime: 5 * 60 * 1000,
   });
 
-  const segments = content?.segments ?? [];
-  const hasSpeakers = segments.some((s) => s.speaker);
+  // Initialise local mutable segments from loaded content
+  useEffect(() => {
+    if (content?.segments) setLocalSegments(content.segments);
+  }, [content]);
+
+  const hasSpeakers = localSegments.some((s) => s.speaker);
+
+  // Save mutation — PUT /jobs/:id/transcript with full updated segments
+  const saveMutation = useMutation({
+    mutationFn: async (segments: TranscriptSegment[]) => {
+      const token = await getToken();
+      const res = await apiFetch(`/jobs/${id}/transcript`, {
+        token: token!,
+        method: "PUT",
+        body: JSON.stringify({ segments }),
+      });
+      return res.json() as Promise<TranscriptResponse>;
+    },
+    onSuccess: (updatedMeta) => {
+      // Update the transcript meta cache (fresh presigned URLs)
+      queryClient.setQueryData(["transcript", id], updatedMeta);
+      // Update local content cache so re-fetching the JSON URL returns updated segments
+      const newJsonUrl = updatedMeta.downloads?.json?.url;
+      if (newJsonUrl) {
+        queryClient.invalidateQueries({ queryKey: ["transcript-content"] });
+      }
+      setEditingIdx(null);
+      setSavedVisible(true);
+      setTimeout(() => setSavedVisible(false), 2500);
+    },
+  });
+
+  function handleStartEdit(idx: number) {
+    setEditingIdx(idx);
+  }
+
+  function handleSaveEdit(idx: number, newText: string) {
+    const updated = localSegments.map((seg, i) =>
+      i === idx ? { ...seg, text: newText } : seg
+    );
+    setLocalSegments(updated);
+    saveMutation.mutate(updated);
+  }
+
+  function handleCancelEdit() {
+    setEditingIdx(null);
+  }
 
   if (metaLoading || contentLoading) return <Skeleton />;
 
@@ -438,35 +656,67 @@ export default function TranscriptViewer() {
             </>
           )}
         </div>
-        <TabBar tab={tab} onTab={setTab} hasSpeakers={hasSpeakers} />
 
-        {/* Export download buttons — matches wireframe header */}
-        {meta && (
-          <div className="flex items-center gap-1.5 shrink-0">
-            {Object.entries(meta.downloads).map(([fmt, info]) => (
-              <a
-                key={fmt}
-                href={info.url}
-                download
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-ui"
-                style={{ border: "1px solid var(--border)", color: "var(--text-secondary)", backgroundColor: "var(--surface)" }}
-                onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = "var(--surface-raised)")}
-                onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = "var(--surface)")}
-              >
-                <svg className="h-3 w-3" style={{ color: "var(--text-tertiary)" }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
-                </svg>
-                {fmt.toUpperCase()}
-              </a>
-            ))}
-          </div>
-        )}
+        <TabBar tab={tab} onTab={(t) => { setTab(t); setEditingIdx(null); }} hasSpeakers={hasSpeakers} />
+
+        <div className="flex items-center gap-2 shrink-0">
+          <SavedBadge visible={savedVisible} />
+
+          {/* Download buttons */}
+          {meta && (
+            <div className="flex items-center gap-1.5">
+              {Object.entries(meta.downloads).map(([fmt, info]) => (
+                <a
+                  key={fmt}
+                  href={info.url}
+                  download
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-ui"
+                  style={{ border: "1px solid var(--border)", color: "var(--text-secondary)", backgroundColor: "var(--surface)" }}
+                  onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = "var(--surface-raised)")}
+                  onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = "var(--surface)")}
+                >
+                  <svg className="h-3 w-3" style={{ color: "var(--text-tertiary)" }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+                      d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+                  </svg>
+                  {fmt.toUpperCase()}
+                </a>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
+      {/* Save error */}
+      {saveMutation.isError && (
+        <div className="mb-4 rounded-xl border border-red-100 bg-red-50 px-4 py-2.5">
+          <p className="text-sm text-red-700">Save failed — please try again.</p>
+        </div>
+      )}
+
       {/* Tab content */}
-      {tab === "player" && <PlayerView videoUrl={meta.video_url} segments={segments} />}
-      {tab === "text" && <TextView segments={segments} />}
-      {tab === "speaker" && <SpeakerView segments={segments} />}
+      {tab === "player" && (
+        <PlayerView
+          videoUrl={meta.video_url}
+          segments={localSegments}
+          editingIdx={editingIdx}
+          saving={saveMutation.isPending}
+          onStartEdit={handleStartEdit}
+          onSaveEdit={handleSaveEdit}
+          onCancelEdit={handleCancelEdit}
+        />
+      )}
+      {tab === "text" && <TextView segments={localSegments} />}
+      {tab === "speaker" && (
+        <SpeakerView
+          segments={localSegments}
+          editingIdx={editingIdx}
+          saving={saveMutation.isPending}
+          onStartEdit={handleStartEdit}
+          onSaveEdit={handleSaveEdit}
+          onCancelEdit={handleCancelEdit}
+        />
+      )}
     </div>
   );
 }

@@ -15,6 +15,7 @@ from app.schemas import (
     JobListResponse,
     JobResponse,
     TranscriptResponse,
+    TranscriptUpdateRequest,
 )
 from app.services import s3 as s3_service
 from app.services.quotas import check_concurrent, check_quota
@@ -191,6 +192,70 @@ async def get_transcript(
     # Presign the input video with a long TTL so a 2-hour video doesn't expire mid-playback
     video_url, _ = s3_service.presign_get(job.input_s3_key, expires_in=7200)
 
+    return TranscriptResponse(downloads=downloads, video_url=video_url)
+
+
+def _srt_time(seconds: float) -> str:
+    h = int(seconds // 3600)
+    m = int((seconds % 3600) // 60)
+    s = int(seconds % 60)
+    ms = int((seconds % 1) * 1000)
+    return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+
+
+def _build_json(segments: list[dict], job_id_str: str) -> bytes:
+    return json.dumps(
+        {"job_id": job_id_str, "segments": segments}, ensure_ascii=False, indent=2
+    ).encode("utf-8")
+
+
+def _build_srt(segments: list[dict]) -> bytes:
+    lines: list[str] = []
+    for i, seg in enumerate(segments, 1):
+        lines.append(str(i))
+        lines.append(f"{_srt_time(seg['start'])} --> {_srt_time(seg['end'])}")
+        lines.append(seg["text"])
+        lines.append("")
+    return "\n".join(lines).encode("utf-8")
+
+
+def _build_txt(segments: list[dict]) -> bytes:
+    return "\n".join(seg["text"] for seg in segments).encode("utf-8")
+
+
+@router.put("/{job_id}/transcript", response_model=TranscriptResponse)
+async def update_transcript(
+    job_id: uuid.UUID,
+    body: TranscriptUpdateRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> TranscriptResponse:
+    job = await _get_job_or_404(job_id, user.id, db)
+    if job.status != JobStatus.completed:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Job is not completed")
+    if not job.output_s3_keys:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No transcript available")
+
+    segs = [s.model_dump(exclude_none=False) for s in body.segments]
+    job_id_str = str(job_id)
+
+    format_bytes: dict[str, tuple[bytes, str]] = {
+        "json": (_build_json(segs, job_id_str), "application/json"),
+        "srt":  (_build_srt(segs), "text/plain; charset=utf-8"),
+        "txt":  (_build_txt(segs), "text/plain; charset=utf-8"),
+    }
+
+    for fmt, s3_key in job.output_s3_keys.items():
+        if fmt in format_bytes:
+            content, content_type = format_bytes[fmt]
+            s3_service.put_bytes(s3_key, content, content_type)
+
+    downloads: dict[str, DownloadLink] = {}
+    for fmt, s3_key in job.output_s3_keys.items():
+        url, expires_at = s3_service.presign_get(s3_key)
+        downloads[fmt] = DownloadLink(url=url, expires_at=expires_at)
+
+    video_url, _ = s3_service.presign_get(job.input_s3_key, expires_in=7200)
     return TranscriptResponse(downloads=downloads, video_url=video_url)
 
 
