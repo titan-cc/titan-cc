@@ -281,7 +281,7 @@ async def retry_job(
 
     job.status = JobStatus.queued
     job.claim_token = None
-    job.retry_count = 0
+    job.retry_count = job.max_retries  # exhausted — auto-retry won't re-queue after a manual retry fails again
     job.failure_class = None
     job.failure_code = None
     job.failure_message = None

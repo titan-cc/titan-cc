@@ -16,7 +16,7 @@ const CLASS_META: Record<FailureClass, GroupMeta> = {
   user_content:     { label: "File issues",      description: "The uploaded file could not be processed.",        canRetry: false, pillStyle: { color: "#b45309", backgroundColor: "#fffbeb" }, pillBorder: "#fcd34d" },
   user_quota:       { label: "Quota exceeded",   description: "Monthly usage limit was reached.",                 canRetry: false, pillStyle: { color: "var(--brand-dark)", backgroundColor: "var(--brand-subtle)" }, pillBorder: "var(--brand-tint)" },
   system_transient: { label: "System error",     description: "Temporary failure — automatic retries exhausted.", canRetry: true,  pillStyle: { color: "#991b1b", backgroundColor: "#fef2f2" }, pillBorder: "#fecaca" },
-  system_permanent: { label: "System error",     description: "Unrecoverable worker failure.",                    canRetry: true,  pillStyle: { color: "#991b1b", backgroundColor: "#fef2f2" }, pillBorder: "#fecaca" },
+  system_permanent: { label: "System error",     description: "Unrecoverable worker failure.",                    canRetry: false, pillStyle: { color: "#991b1b", backgroundColor: "#fef2f2" }, pillBorder: "#fecaca" },
   timeout:          { label: "Timed out",        description: "Job exceeded the processing time limit.",          canRetry: true,  pillStyle: { color: "#c2410c", backgroundColor: "#fff7ed" }, pillBorder: "#fed7aa" },
   cancelled:        { label: "Cancelled",        description: "Cancelled by you.",                                canRetry: false, pillStyle: { color: "var(--text-tertiary)", backgroundColor: "var(--surface-raised)" }, pillBorder: "var(--border)" },
 };
