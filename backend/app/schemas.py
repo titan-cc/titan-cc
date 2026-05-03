@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import Annotated, Any
 
 from pydantic import BaseModel, Field
 
@@ -95,13 +95,19 @@ class TranscriptResponse(BaseModel):
 class TranscriptSegmentUpdate(BaseModel):
     start: float
     end: float
-    text: str
-    speaker: str | None = None
+    # 5 000 chars per segment is ~3× a typical 30-second spoken paragraph.
+    text: Annotated[str, Field(max_length=5_000)]
+    # 50 chars covers "Speaker 1" / "SPEAKER_00" style labels.
+    speaker: Annotated[str | None, Field(max_length=50)] = None
     words: list[dict] | None = None
 
 
+# 2-hour audio at ~3 words/sec ≈ 21 600 word-level segments; 30 000 is a safe ceiling.
+_MAX_SEGMENTS = 30_000
+
+
 class TranscriptUpdateRequest(BaseModel):
-    segments: list[TranscriptSegmentUpdate]
+    segments: Annotated[list[TranscriptSegmentUpdate], Field(max_length=_MAX_SEGMENTS)]
 
 
 # ── Notifications ──────────────────────────────────────────────────────────────

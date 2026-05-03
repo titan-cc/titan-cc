@@ -1,6 +1,7 @@
 import asyncio
+import urllib.parse
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
+from typing import Any, AsyncGenerator
 
 import sentry_sdk
 import structlog
@@ -17,8 +18,59 @@ from app.services.watchdog import run_watchdog
 
 logger = structlog.get_logger()
 
+# AWS query-param names that carry signing credentials in presigned URLs.
+_AWS_SENSITIVE_PARAMS = frozenset({
+    "x-amz-signature",
+    "x-amz-credential",
+    "x-amz-security-token",
+    "x-amz-algorithm",
+    "x-amz-date",
+    "x-amz-expires",
+    "x-amz-signedheaders",
+})
+
+
+def _scrub_url(value: str) -> str:
+    """Replace sensitive AWS query-param values with [REDACTED]."""
+    try:
+        parsed = urllib.parse.urlparse(value)
+        if not parsed.query or "X-Amz-" not in parsed.query:
+            return value
+        params = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
+        scrubbed = {
+            k: (["[REDACTED]"] if k.lower() in _AWS_SENSITIVE_PARAMS else v)
+            for k, v in params.items()
+        }
+        return urllib.parse.urlunparse(
+            parsed._replace(query=urllib.parse.urlencode(scrubbed, doseq=True))
+        )
+    except Exception:
+        return "[URL_SCRUBBED]"
+
+
+def _walk_and_scrub(obj: Any) -> Any:
+    """Recursively scrub AWS credentials from all strings in a Sentry event."""
+    if isinstance(obj, str):
+        return _scrub_url(obj) if "X-Amz-" in obj else obj
+    if isinstance(obj, dict):
+        return {k: _walk_and_scrub(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_walk_and_scrub(i) for i in obj]
+    return obj
+
+
+def _before_send(event: dict[str, Any], hint: dict[str, Any]) -> dict[str, Any]:
+    """Scrub AWS presigned URL credentials from all Sentry event data."""
+    return _walk_and_scrub(event)  # type: ignore[return-value]
+
+
 if settings.sentry_dsn:
-    sentry_sdk.init(dsn=settings.sentry_dsn, environment=settings.app_env)
+    sentry_sdk.init(
+        dsn=settings.sentry_dsn,
+        environment=settings.app_env,
+        send_default_pii=False,   # never attach user IP / cookies
+        before_send=_before_send, # strip X-Amz-* params from captured locals/URLs
+    )
 
 
 @asynccontextmanager
