@@ -36,23 +36,39 @@ def _upload_ttl(size_bytes: int) -> int:
     return max(_PRESIGN_TTL_PUT_MIN, needed)
 
 
-def presign_put(
+def presign_post(
     user_id: uuid.UUID,
     filename: str,
     content_type: str,
     size_bytes: int,
-) -> tuple[str, str, datetime]:
-    """Return (upload_url, s3_key, expires_at). Content-type is locked into the signed URL."""
+) -> tuple[str, dict[str, str], str, datetime]:
+    """Return (upload_url, form_fields, s3_key, expires_at).
+
+    Uses generate_presigned_post rather than generate_presigned_url("put_object")
+    so that a ContentLengthRange condition can be embedded in the signed policy.
+    S3 enforces the range server-side — a client cannot bypass it by sending a
+    larger file even if they hold a valid presigned URL.
+
+    The caller must POST multipart/form-data with all form_fields first,
+    then append the file as the last field named "file".
+    """
     safe = re.sub(r"[^\w.\-]", "_", filename)[:200]
     s3_key = f"inputs/{user_id}/{uuid.uuid4()}/{safe}"
     ttl = _upload_ttl(size_bytes)
-    url = _client().generate_presigned_url(
-        "put_object",
-        Params={"Bucket": settings.s3_bucket, "Key": s3_key, "ContentType": content_type},
+    resp = _client().generate_presigned_post(
+        Bucket=settings.s3_bucket,
+        Key=s3_key,
+        Fields={"Content-Type": content_type},
+        Conditions=[
+            {"Content-Type": content_type},
+            # Enforce declared size at S3 level. Allow ±1 byte tolerance for
+            # rounding; upper bound is the size declared in the presign request.
+            ["content-length-range", 1, size_bytes],
+        ],
         ExpiresIn=ttl,
     )
     expires_at = datetime.now(UTC) + timedelta(seconds=ttl)
-    return url, s3_key, expires_at
+    return resp["url"], dict(resp["fields"]), s3_key, expires_at
 
 
 def presign_get(s3_key: str, expires_in: int = _PRESIGN_TTL_GET) -> tuple[str, datetime]:

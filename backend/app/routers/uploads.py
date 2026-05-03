@@ -28,10 +28,15 @@ async def presign_upload(
 
     await check_quota(user.quota, body.duration_seconds, db)
 
-    upload_url, s3_key, expires_at = s3_service.presign_put(
+    upload_url, form_fields, s3_key, expires_at = s3_service.presign_post(
         user_id=user.id,
         filename=body.filename,
         content_type=body.content_type,
         size_bytes=body.size_bytes,
     )
-    return PresignResponse(upload_url=upload_url, s3_key=s3_key, expires_at=expires_at)
+    return PresignResponse(
+        upload_url=upload_url,
+        form_fields=form_fields,
+        s3_key=s3_key,
+        expires_at=expires_at,
+    )

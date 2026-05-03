@@ -18,6 +18,7 @@ class PresignRequest(BaseModel):
 
 class PresignResponse(BaseModel):
     upload_url: str
+    form_fields: dict[str, str]  # S3 policy fields — must be sent before the file in FormData
     s3_key: str
     expires_at: datetime
 

@@ -44,6 +44,7 @@ export interface JobListResponse {
 
 export interface PresignResponse {
   upload_url: string;
+  form_fields: Record<string, string>; // S3 policy fields — must precede the file in FormData
   s3_key: string;
   expires_at: string;
 }

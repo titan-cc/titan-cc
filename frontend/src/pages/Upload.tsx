@@ -56,20 +56,32 @@ function detectDuration(file: File): Promise<number> {
   });
 }
 
-function xhrPut(url: string, file: File, onProgress: (pct: number) => void): Promise<void> {
+function xhrPost(
+  url: string,
+  fields: Record<string, string>,
+  file: File,
+  onProgress: (pct: number) => void,
+): Promise<void> {
   return new Promise((resolve, reject) => {
+    // S3 presigned POST requires multipart/form-data with all policy fields
+    // appended BEFORE the file. Field order matters — S3 ignores anything
+    // after the file field.
+    const formData = new FormData();
+    for (const [k, v] of Object.entries(fields)) formData.append(k, v);
+    formData.append("file", file);
+
     const xhr = new XMLHttpRequest();
-    xhr.open("PUT", url);
-    xhr.setRequestHeader("Content-Type", file.type);
+    xhr.open("POST", url);
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
     };
     xhr.onload = () => {
+      // S3 presigned POST returns 204 on success (no success_action_status set)
       if (xhr.status >= 200 && xhr.status < 300) resolve();
-      else reject(new Error(`Upload failed: ${xhr.status}`));
+      else reject(new Error(`Upload failed: ${xhr.status} — ${xhr.responseText}`));
     };
     xhr.onerror = () => reject(new Error("Network error during upload."));
-    xhr.send(file);
+    xhr.send(formData);
   });
 }
 
@@ -243,9 +255,9 @@ export default function Upload() {
           duration_seconds: durationSeconds,
         }),
       });
-      const { upload_url, s3_key } = (await presignRes.json()) as PresignResponse;
+      const { upload_url, form_fields, s3_key } = (await presignRes.json()) as PresignResponse;
 
-      await xhrPut(upload_url, file, setUploadPct);
+      await xhrPost(upload_url, form_fields, file, setUploadPct);
 
       setStage("creating");
       const jobRes = await apiFetch("/jobs", {
