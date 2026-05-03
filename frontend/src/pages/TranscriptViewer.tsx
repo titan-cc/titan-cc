@@ -549,6 +549,12 @@ export default function TranscriptViewer() {
     enabled: !!id,
     staleTime: 4 * 60 * 1000,
     gcTime: 5 * 60 * 1000,
+    // Presigned download URLs expire after 5 min; refresh every 4 min so they
+    // never silently expire while the viewer is open. This also re-keys the
+    // transcript-content query (keyed by jsonUrl) so the JSON re-fetches from
+    // the new URL if TanStack Query has GC'd the cached content.
+    refetchInterval: 4 * 60 * 1000,
+    refetchIntervalInBackground: false, // pause when tab hidden; refetchOnWindowFocus handles return
   });
 
   const jsonUrl = meta?.downloads?.json?.url;
