@@ -11,6 +11,11 @@ class Settings(BaseSettings):
     clerk_secret_key: str = ""
     clerk_publishable_key: str = ""
     clerk_jwks_url: str = ""
+    # Base URL of your Clerk instance — used to verify the `iss` claim.
+    # Example: https://your-app.clerk.accounts.dev
+    # Derive by stripping /.well-known/jwks.json from clerk_jwks_url,
+    # or set explicitly via CLERK_ISSUER env var.
+    clerk_issuer: str = ""
 
     # AWS / S3
     aws_access_key_id: str = ""
