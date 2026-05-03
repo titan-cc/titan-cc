@@ -26,7 +26,8 @@ export function useTranscript(jobId: string, enabled: boolean) {
       return res.json();
     },
     enabled,
-    staleTime: 4 * 60 * 1000, // presigned URLs are valid for 5 min; refresh just before expiry
+    staleTime: 4 * 60 * 1000,   // presigned URLs are valid for 5 min; refresh just before expiry
     gcTime: 5 * 60 * 1000,
+    refetchInterval: 4 * 60 * 1000, // auto-refresh every 4 min so links never silently expire
   });
 }

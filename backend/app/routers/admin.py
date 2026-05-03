@@ -15,8 +15,10 @@ from sqlalchemy.orm import selectinload
 from app.config import settings
 from app.db import get_db
 from app.deps import require_admin
-from app.models import Job, Quota, User
+from app.models import Job, Quota, User, UserActivityLog
 from app.schemas import (
+    ActivityLogEntry,
+    ActivityLogResponse,
     AdminJobListResponse,
     AdminJobResponse,
     AdminUserListResponse,
@@ -27,6 +29,7 @@ from app.schemas import (
     QuotaResponse,
     UpdateUserRequest,
 )
+from app.services.activity import log_activity
 
 logger = structlog.get_logger()
 
@@ -36,10 +39,10 @@ VALID_ROLES = {"user", "admin"}
 VALID_ACCESS_LEVELS = {"basic", "standard", "pro", "enterprise"}
 
 ACCESS_LEVEL_PRESETS: dict[str, dict[str, int]] = {
-    "basic":      {"max_concurrent_jobs": 12, "max_minutes_per_month": 300,  "max_duration_seconds": 7_200},
-    "standard":   {"max_concurrent_jobs": 12, "max_minutes_per_month": 600,  "max_duration_seconds": 7_200},
-    "pro":        {"max_concurrent_jobs": 12, "max_minutes_per_month": 1_200, "max_duration_seconds": 14_400},
-    "enterprise": {"max_concurrent_jobs": 12, "max_minutes_per_month": 5_000, "max_duration_seconds": 28_800},
+    "basic":      {"max_concurrent_jobs": 2,  "max_minutes_per_month": 300,  "max_duration_seconds": 7_200},
+    "standard":   {"max_concurrent_jobs": 3,  "max_minutes_per_month": 600,  "max_duration_seconds": 7_200},
+    "pro":        {"max_concurrent_jobs": 5,  "max_minutes_per_month": 1_200, "max_duration_seconds": 14_400},
+    "enterprise": {"max_concurrent_jobs": 10, "max_minutes_per_month": 5_000, "max_duration_seconds": 28_800},
 }
 
 # Simple TTL cache: key → (fetched_at, data)
@@ -221,7 +224,7 @@ async def _fetch_aws() -> ProviderBilling:
             TimePeriod={"Start": start.strftime("%Y-%m-%d"), "End": end.strftime("%Y-%m-%d")},
             Granularity="MONTHLY",
             Metrics=["UnblendedCost"],
-            GroupBy=[{"Type": "SERVICE", "Key": "SERVICE"}],
+            GroupBy=[{"Type": "DIMENSION", "Key": "SERVICE"}],
         )
 
         items: list[BillingLineItem] = []
@@ -240,8 +243,15 @@ async def _fetch_aws() -> ProviderBilling:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, _sync_fetch)
     except Exception as exc:
-        logger.warning("billing_aws_error", error=str(exc))
-        return ProviderBilling(provider="aws", period=period, error=str(exc))
+        err = str(exc)
+        logger.warning("billing_aws_error", error=err)
+        if "DataUnavailableException" in err:
+            return ProviderBilling(
+                provider="aws",
+                period=period,
+                error="Cost Explorer data not yet available. AWS takes up to 24 hours to ingest data after first enabling Cost Explorer.",
+            )
+        return ProviderBilling(provider="aws", period=period, error=err)
 
 
 # ── User management endpoints ─────────────────────────────────────────────────
@@ -338,6 +348,13 @@ async def update_user(
     count_result = await db.execute(select(func.count(Job.id)).where(Job.user_id == user_id))
     job_count = count_result.scalar() or 0
 
+    await log_activity(db, user.id, "admin_update_user", actor_id=admin.id, metadata={
+        "role": body.role,
+        "is_enabled": body.is_enabled,
+        "access_level": body.access_level,
+    })
+    await db.commit()
+
     logger.info("admin_updated_user", admin_id=str(admin.id), target_user_id=str(user_id))
     return _build_user_response(user, job_count)
 
@@ -361,8 +378,72 @@ async def refresh_quota(
     await db.commit()
     await db.refresh(quota)
 
+    await log_activity(db, user_id, "admin_quota_refresh", actor_id=admin.id)
+    await db.commit()
+
     logger.info("admin_refreshed_quota", admin_id=str(admin.id), target_user_id=str(user_id))
     return QuotaResponse.model_validate(quota)
+
+
+# ── Activity log endpoint ─────────────────────────────────────────────────────
+
+@router.get("/activity", response_model=ActivityLogResponse)
+async def get_activity_log(
+    cursor: int | None = None,
+    limit: int = Query(50, ge=1, le=200),
+    event_type: str | None = None,
+    user_id: uuid.UUID | None = None,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> Any:
+    q = select(UserActivityLog).order_by(UserActivityLog.id.desc())
+
+    if event_type:
+        q = q.where(UserActivityLog.event_type == event_type)
+    if user_id:
+        q = q.where(UserActivityLog.user_id == user_id)
+    if cursor:
+        q = q.where(UserActivityLog.id < cursor)
+
+    q = q.limit(limit + 1)
+    rows = list((await db.execute(q)).scalars())
+
+    has_more = len(rows) > limit
+    rows = rows[:limit]
+
+    # Collect all user_ids we need emails for
+    all_user_ids: set[uuid.UUID] = set()
+    for r in rows:
+        if r.user_id:
+            all_user_ids.add(r.user_id)
+        if r.actor_id:
+            all_user_ids.add(r.actor_id)
+
+    email_map: dict[uuid.UUID, str] = {}
+    if all_user_ids:
+        users = list(
+            (await db.execute(select(User).where(User.id.in_(list(all_user_ids))))).scalars()
+        )
+        email_map = {u.id: u.email for u in users}
+
+    events = [
+        ActivityLogEntry(
+            id=r.id,
+            user_id=r.user_id,
+            user_email=email_map.get(r.user_id) if r.user_id else None,
+            actor_id=r.actor_id,
+            actor_email=email_map.get(r.actor_id) if r.actor_id else None,
+            event_type=r.event_type,
+            metadata=r.metadata_,
+            created_at=r.created_at,
+        )
+        for r in rows
+    ]
+
+    return ActivityLogResponse(
+        events=events,
+        next_cursor=rows[-1].id if has_more and rows else None,
+    )
 
 
 # ── Billing endpoint ──────────────────────────────────────────────────────────
@@ -443,7 +524,7 @@ async def reset_stuck_dispatched_jobs(
     x_admin_key: str = Query(...),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    if x_admin_key != settings.runpod_webhook_secret:
+    if not settings.admin_api_key or x_admin_key != settings.admin_api_key:
         raise HTTPException(status_code=403, detail="Forbidden")
     """Reset dispatched jobs stuck for longer than older_than_minutes back to queued."""
     from app.models import JobEvent, JobStatus

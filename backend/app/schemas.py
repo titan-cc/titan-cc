@@ -239,3 +239,21 @@ class BillingResponse(BaseModel):
     runpod: ProviderBilling
     railway: ProviderBilling
     aws: ProviderBilling
+
+
+# ── Activity log ───────────────────────────────────────────────────────────────
+
+class ActivityLogEntry(BaseModel):
+    id: int
+    user_id: uuid.UUID | None
+    user_email: str | None
+    actor_id: uuid.UUID | None
+    actor_email: str | None
+    event_type: str
+    metadata: dict[str, Any] | None
+    created_at: datetime
+
+
+class ActivityLogResponse(BaseModel):
+    events: list[ActivityLogEntry]
+    next_cursor: int | None

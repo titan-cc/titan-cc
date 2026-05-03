@@ -174,6 +174,28 @@ class Notification(Base):
     job: Mapped["Job | None"] = relationship("Job", back_populates="notifications")
 
 
+class UserActivityLog(Base):
+    __tablename__ = "user_activity_log"
+    __table_args__ = (
+        Index("idx_activity_user_created", "user_id", "created_at"),
+        Index("idx_activity_created", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    actor_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    event_type: Mapped[str] = mapped_column(Text, nullable=False)
+    metadata_: Mapped[dict | None] = mapped_column("metadata", JSONB, nullable=True)
+    ip_address: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMPTZ, nullable=False, server_default=func.now()
+    )
+
+
 class JobEvent(Base):
     __tablename__ = "job_events"
 

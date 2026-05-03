@@ -211,7 +211,6 @@ export default function AdminUsers() {
         ? `/admin/users?limit=100&search=${encodeURIComponent(debouncedSearch)}`
         : "/admin/users?limit=100";
       const res = await apiFetch(url, { token: token! });
-      if (!res.ok) throw new Error("Failed to load users");
       return res.json();
     },
     staleTime: 30_000,
@@ -340,10 +339,10 @@ export default function AdminUsers() {
         </p>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {([
-            { level: "basic" as AccessLevel,      concurrent: 2,  monthlyMin: 300,  maxFile: "2 hr" },
-            { level: "standard" as AccessLevel,   concurrent: 3,  monthlyMin: 600,  maxFile: "2 hr" },
-            { level: "pro" as AccessLevel,        concurrent: 5,  monthlyMin: 1200, maxFile: "4 hr" },
-            { level: "enterprise" as AccessLevel, concurrent: 10, monthlyMin: 5000, maxFile: "8 hr" },
+            { level: "basic" as AccessLevel,      concurrent: 12, monthlyMin: 300,  maxFile: "2 hr" },
+            { level: "standard" as AccessLevel,   concurrent: 12, monthlyMin: 600,  maxFile: "2 hr" },
+            { level: "pro" as AccessLevel,        concurrent: 12, monthlyMin: 1200, maxFile: "4 hr" },
+            { level: "enterprise" as AccessLevel, concurrent: 12, monthlyMin: 5000, maxFile: "8 hr" },
           ]).map(({ level, concurrent, monthlyMin, maxFile }) => (
             <div key={level} className="rounded-xl p-3 space-y-2" style={{ backgroundColor: "rgba(255,255,255,0.03)", border: "1px solid var(--border)" }}>
               <Badge label={ACCESS_LEVEL_LABELS[level]} colors={ACCESS_LEVEL_COLORS[level]} />

@@ -9,6 +9,7 @@ import Failures from "./pages/Failures";
 import TranscriptViewer from "./pages/TranscriptViewer";
 import AdminUsers from "./pages/AdminUsers";
 import AdminBilling from "./pages/AdminBilling";
+import AdminActivity from "./pages/AdminActivity";
 
 export default function App() {
   return (
@@ -31,6 +32,7 @@ export default function App() {
               <Route index element={<Navigate to="/admin/users" replace />} />
               <Route path="users" element={<AdminUsers />} />
               <Route path="billing" element={<AdminBilling />} />
+              <Route path="activity" element={<AdminActivity />} />
             </Route>
           </Routes>
         </Layout>

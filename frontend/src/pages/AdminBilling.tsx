@@ -167,12 +167,12 @@ export default function AdminBilling() {
     staleTime: 270_000, // 4.5 min — just under the server-side 5-min cache
   });
 
-  const monthlySpend =
-    data
-      ? [data.railway, data.aws]
-          .filter((p) => !p.error && p.total_usd !== null)
-          .reduce((sum, p) => sum + (p.total_usd ?? 0), 0)
-      : null;
+  const bothResolved =
+    data != null && !data.railway.error && !data.aws.error;
+
+  const monthlySpend = bothResolved
+    ? (data!.railway.total_usd ?? 0) + (data!.aws.total_usd ?? 0)
+    : null;
 
   return (
     <div className="space-y-6">
@@ -281,6 +281,16 @@ export default function AdminBilling() {
               <>In the <strong>AWS IAM console</strong>, find the <code className="px-1 rounded" style={{ backgroundColor: "rgba(255,255,255,0.07)" }}>titan-cc-backend</code> user.</>,
               <>Attach an inline policy granting <code className="px-1 rounded" style={{ backgroundColor: "rgba(255,255,255,0.07)" }}>ce:GetCostAndUsage</code> on <code className="px-1 rounded" style={{ backgroundColor: "rgba(255,255,255,0.07)" }}>*</code>.</>,
               <>Cost Explorer is global — the policy resource must be <code className="px-1 rounded" style={{ backgroundColor: "rgba(255,255,255,0.07)" }}>arn:aws:ce:*:*:*</code> or <code className="px-1 rounded" style={{ backgroundColor: "rgba(255,255,255,0.07)" }}>*</code>.</>,
+            ],
+          });
+        }
+
+        if (data.aws.error?.includes("24 hours")) {
+          hints.push({
+            label: "AWS Cost Explorer — data pending",
+            steps: [
+              <>Cost Explorer was recently enabled. AWS takes up to <strong>24 hours</strong> to ingest historical data.</>,
+              <>No action needed — check back tomorrow and hit <strong>Refresh</strong>.</>,
             ],
           });
         }

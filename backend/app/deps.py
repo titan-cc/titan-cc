@@ -13,6 +13,7 @@ from app.auth import verify_clerk_jwt
 from app.config import settings
 from app.db import get_db
 from app.models import Quota, User
+from app.services.activity import log_login
 
 bearer_scheme = HTTPBearer()
 
@@ -60,6 +61,8 @@ async def get_current_user(
         if not email:
             email = await _fetch_email_from_clerk(clerk_user_id)
         user = await _create_user(db, clerk_user_id, email)
+        await log_login(db, user.id, is_new_user=True)
+        await db.commit()
     else:
         dirty = False
         # Resolve email: JWT → DB → Clerk API (once, then cached in DB).
@@ -82,9 +85,13 @@ async def get_current_user(
             user.role = "admin"
             dirty = True
 
+        await log_login(db, user.id)
+
         if dirty:
             await db.commit()
             await db.refresh(user)
+        else:
+            await db.commit()
 
     if not user.is_enabled:
         raise HTTPException(

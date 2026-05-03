@@ -31,6 +31,7 @@ from app.schemas import (
     WebhookFailedPayload,
     WebhookProgressPayload,
 )
+from app.services.activity import log_activity
 from app.services.email import send_job_completed_email, send_job_failed_email
 
 logger = structlog.get_logger()
@@ -155,6 +156,12 @@ async def _handle_completed(job: Job, payload: dict[str, Any], db: AsyncSession)
         ))
         await send_job_completed_email(user.email, str(job.id), job.input_duration_seconds)
 
+    await log_activity(db, job.user_id, "job_completed", metadata={
+        "job_id": str(job.id),
+        "cost_usd": p.cost_usd,
+        "duration_seconds": job.input_duration_seconds,
+    })
+
 
 async def _handle_failed(job: Job, payload: dict[str, Any], db: AsyncSession) -> None:
     try:
@@ -208,6 +215,12 @@ async def _handle_failed(job: Job, payload: dict[str, Any], db: AsyncSession) ->
                 body=p.failure_message,
             ))
             await send_job_failed_email(user.email, str(job.id), p.failure_message)
+
+        await log_activity(db, job.user_id, "job_failed", metadata={
+            "job_id": str(job.id),
+            "failure_code": p.failure_code,
+            "failure_class": str(p.failure_class),
+        })
 
 
 # ── Endpoint ───────────────────────────────────────────────────────────────────

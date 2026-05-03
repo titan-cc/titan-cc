@@ -144,9 +144,18 @@ const MAIN_NAV = [
   { to: "/failures", label: "Failures", icon: <FailuresIcon /> },
 ];
 
+function ActivityIcon() {
+  return (
+    <svg className="h-[17px] w-[17px] shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.6}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 12h16.5m-16.5 3.75h16.5M3.75 19.5h16.5M5.625 4.5h12.75a1.875 1.875 0 010 3.75H5.625a1.875 1.875 0 010-3.75z" />
+    </svg>
+  );
+}
+
 const ADMIN_NAV = [
-  { to: "/admin/users",   label: "Users",   icon: <UsersIcon />   },
-  { to: "/admin/billing", label: "Billing", icon: <BillingIcon /> },
+  { to: "/admin/users",    label: "Users",    icon: <UsersIcon />    },
+  { to: "/admin/activity", label: "Activity", icon: <ActivityIcon /> },
+  { to: "/admin/billing",  label: "Billing",  icon: <BillingIcon />  },
 ];
 
 // ── Notification bell ─────────────────────────────────────────────────────────

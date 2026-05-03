@@ -145,3 +145,21 @@ export interface BillingResponse {
   railway: ProviderBilling;
   aws: ProviderBilling;
 }
+
+// ── Activity log ──────────────────────────────────────────────────────────────
+
+export interface ActivityLogEntry {
+  id: number;
+  user_id: string | null;
+  user_email: string | null;
+  actor_id: string | null;
+  actor_email: string | null;
+  event_type: string;
+  metadata: Record<string, unknown> | null;
+  created_at: string;
+}
+
+export interface ActivityLogResponse {
+  events: ActivityLogEntry[];
+  next_cursor: number | null;
+}

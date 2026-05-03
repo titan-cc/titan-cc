@@ -376,7 +376,7 @@ export default function Upload() {
                   {dragging ? "Release to upload" : "Drop a file or click to browse"}
                 </p>
                 <p className="text-xs mt-1" style={{ color: "var(--text-tertiary)" }}>
-                  Audio &amp; video · up to 5 GB · 2 hours max
+                  Audio &amp; video · up to 5 GB · {me?.quota ? `${Math.floor(me.quota.max_duration_seconds / 3600)} hours` : "2 hours"} max
                 </p>
               </div>
             </div>
@@ -466,7 +466,7 @@ export default function Upload() {
           <ul className="space-y-2.5">
             {[
               ["Max file size", "5 GB"],
-              ["Max duration", "2 hours"],
+              ["Max duration", me?.quota ? `${Math.floor(me.quota.max_duration_seconds / 3600)} hours` : "2 hours"],
               ["Output formats", "JSON · SRT · TXT"],
             ].map(([label, value]) => (
               <li key={label} className="flex items-center justify-between gap-4">

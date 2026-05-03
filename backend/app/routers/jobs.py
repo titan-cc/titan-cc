@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.deps import get_current_user, get_db
 from app.models import IdempotencyKey, Job, JobEvent, JobStatus, User
+from app.services.activity import log_activity
 from app.schemas import (
     DownloadLink,
     JobCreateRequest,
@@ -109,6 +110,12 @@ async def create_job(
         .where(IdempotencyKey.key == idempotency_key)
         .values(job_id=job.id)
     )
+
+    await log_activity(db, user.id, "job_submitted", metadata={
+        "job_id": str(job.id),
+        "filename": body.filename,
+        "duration_seconds": body.duration_seconds,
+    })
 
     await db.commit()
     await db.refresh(job)
@@ -285,6 +292,7 @@ async def retry_job(
     job.updated_at = datetime.now(UTC)
 
     db.add(JobEvent(job_id=job.id, event_type="manual_retry", to_status=JobStatus.queued))
+    await log_activity(db, user.id, "job_retried", metadata={"job_id": str(job.id)})
 
     await db.commit()
     await db.refresh(job)
@@ -321,6 +329,7 @@ async def cancel_job(
         job_id=job.id, event_type="cancelled",
         from_status=prior_status, to_status=JobStatus.cancelled,
     ))
+    await log_activity(db, user.id, "job_cancelled", metadata={"job_id": str(job.id)})
 
     await db.commit()
     await db.refresh(job)

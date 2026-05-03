@@ -116,7 +116,7 @@ function DownloadCard({ jobId }: { jobId: string }) {
         ))}
       </div>
       <p className="text-[11px] mt-3" style={{ color: "var(--text-tertiary)" }}>
-        Links expire in 5 minutes. Reload to refresh.
+        Links auto-refresh every 4 minutes.
       </p>
     </div>
   );

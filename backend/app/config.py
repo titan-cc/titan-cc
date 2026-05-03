@@ -41,6 +41,8 @@ class Settings(BaseSettings):
     cors_origins: list[str] = ["http://localhost:5173", "https://tools.soexcellence.com"]
     # Comma-separated emails that get role='admin' on first sign-in
     admin_emails: list[str] = []
+    # Separate key for internal admin API calls (reset-dispatched etc.)
+    admin_api_key: str = ""
 
 
 settings = Settings()

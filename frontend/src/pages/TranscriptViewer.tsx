@@ -544,7 +544,6 @@ export default function TranscriptViewer() {
     queryFn: async () => {
       const token = await getToken();
       const res = await apiFetch(`/jobs/${id}/transcript`, { token: token! });
-      if (!res.ok) throw new Error(await res.text());
       return res.json();
     },
     enabled: !!id,
