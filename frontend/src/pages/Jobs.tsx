@@ -1200,13 +1200,13 @@ function DriveTable({
   const error = tab === "my" ? myError : adminError;
   const jobs = tab === "my" ? (myJobsData?.jobs ?? []) : (adminJobsData?.jobs ?? []);
 
-  // Show folder rows only in the root "all" view, not inside a specific folder
-  // "My Files": personal folders only — org/shared folders belong in "All Files"
-  // "All Files" (admin): all folders, both personal and org-scoped
+  // Show folder rows only at the root "all" view, not inside a specific folder.
+  // Split into personal (owned by user) and team (org-scoped, shared with everyone).
+  // Both sections appear in "My Files" so non-admin users can still access team folders.
   const showFolderRows = folderFilter === "all";
-  const visibleFolders = showFolderRows
-    ? (tab === "my" ? folders.filter((f) => f.scope === "personal") : folders)
-    : [];
+  const personalFolders = showFolderRows ? folders.filter((f) => f.scope === "personal") : [];
+  const teamFolders = showFolderRows ? folders.filter((f) => f.scope === "org") : [];
+  const visibleFolders = [...personalFolders, ...teamFolders];
 
   const totalItems = visibleFolders.length + jobs.length;
   const allChecked = totalItems > 0 && [...visibleFolders.map((f) => f.id), ...jobs.map((j) => j.id)]
@@ -1241,8 +1241,8 @@ function DriveTable({
         onToggleAll={handleToggleAll}
       />
 
-      {/* Folder rows */}
-      {visibleFolders.map((folder) => (
+      {/* Personal folder rows */}
+      {personalFolders.map((folder) => (
         <FolderTableRow
           key={folder.id}
           folder={folder}
@@ -1260,7 +1260,39 @@ function DriveTable({
         />
       ))}
 
-      {/* Thin separator between folders and jobs */}
+      {/* Team Folders section — org-scoped, visible to all users */}
+      {teamFolders.length > 0 && (
+        <>
+          <div className="px-4 py-1" style={{ backgroundColor: "var(--surface-subtle)" }}>
+            <div className="flex items-center gap-2">
+              <div className="flex-1 border-t" style={{ borderColor: "var(--border)" }} />
+              <span className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: "#B1B3B6" }}>
+                Team Folders
+              </span>
+              <div className="flex-1 border-t" style={{ borderColor: "var(--border)" }} />
+            </div>
+          </div>
+          {teamFolders.map((folder) => (
+            <FolderTableRow
+              key={folder.id}
+              folder={folder}
+              selected={selectedIds.has(folder.id)}
+              onSelect={onSelect}
+              onNavigate={onNavigateFolder}
+              onDrop={(jobId, folderId) => onDropJob(jobId, folderId)}
+              isAdmin={isAdmin}
+              onDelete={onDeleteFolder}
+              onRename={onRenameFolder}
+              onScopeChange={onScopeChange}
+              renaming={renamingFolderId === folder.id}
+              onStartRename={onStartRename}
+              onCancelRename={onCancelRename}
+            />
+          ))}
+        </>
+      )}
+
+      {/* Thin separator between folders and files */}
       {visibleFolders.length > 0 && jobs.length > 0 && (
         <div className="px-4 py-1" style={{ backgroundColor: "var(--surface-subtle)" }}>
           <div className="flex items-center gap-2">
