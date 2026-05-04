@@ -8,7 +8,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.deps import get_current_user, get_db
-from app.models import IdempotencyKey, Job, JobEvent, JobStatus, User
+from app.models import Folder, IdempotencyKey, Job, JobEvent, JobStatus, User
 from app.services.activity import log_activity
 from app.schemas import (
     DownloadLink,
@@ -31,11 +31,17 @@ def _request_hash(body: JobCreateRequest) -> str:
 
 
 async def _get_job_or_404(
-    job_id: uuid.UUID, user_id: uuid.UUID, db: AsyncSession, *, is_admin: bool = False
+    job_id: uuid.UUID, user_id: uuid.UUID, db: AsyncSession, *, is_admin: bool = False, allow_org_folder: bool = False
 ) -> Job:
     q = select(Job).where(Job.id == job_id)
     if not is_admin:
-        q = q.where(Job.user_id == user_id)
+        if allow_org_folder:
+            # Allow access if the job belongs to this user OR is in an org-scoped folder
+            q = q.outerjoin(Folder, Job.folder_id == Folder.id).where(
+                or_(Job.user_id == user_id, Folder.scope == "org")
+            )
+        else:
+            q = q.where(Job.user_id == user_id)
     result = await db.execute(q)
     job = result.scalar_one_or_none()
     if job is None:
@@ -136,7 +142,26 @@ async def list_jobs(
 ) -> JobListResponse:
     limit = min(max(1, limit), 100)
 
-    q = select(Job).where(Job.user_id == user.id)
+    # Resolve folder UUID and check scope up-front so we know whether to bypass
+    # the user_id filter (org-scoped folders are shared across all users).
+    parsed_folder_id: uuid.UUID | None = None
+    is_org_folder = False
+
+    if folder_id is not None and folder_id != "unfiled":
+        try:
+            parsed_folder_id = uuid.UUID(folder_id)
+        except ValueError:
+            raise HTTPException(status_code=422, detail="Invalid folder_id")
+        folder_obj = (
+            await db.execute(select(Folder).where(Folder.id == parsed_folder_id))
+        ).scalar_one_or_none()
+        if folder_obj is not None and folder_obj.scope == "org":
+            is_org_folder = True
+
+    # Base query: org-folder queries include all users; everything else is scoped to caller.
+    q = select(Job)
+    if not is_org_folder:
+        q = q.where(Job.user_id == user.id)
 
     if status is not None:
         try:
@@ -148,18 +173,15 @@ async def list_jobs(
 
     if folder_id == "unfiled":
         q = q.where(Job.folder_id.is_(None))
-    elif folder_id is not None:
-        try:
-            q = q.where(Job.folder_id == uuid.UUID(folder_id))
-        except ValueError:
-            raise HTTPException(status_code=422, detail="Invalid folder_id")
+    elif parsed_folder_id is not None:
+        q = q.where(Job.folder_id == parsed_folder_id)
 
     if cursor is not None:
+        cursor_where = [Job.id == cursor]
+        if not is_org_folder:
+            cursor_where.append(Job.user_id == user.id)
         row = (
-            await db.execute(
-                select(Job.created_at, Job.id)
-                .where(Job.id == cursor, Job.user_id == user.id)
-            )
+            await db.execute(select(Job.created_at, Job.id).where(*cursor_where))
         ).one_or_none()
         if row is not None:
             cur_ts, cur_id = row
@@ -187,7 +209,7 @@ async def get_job(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JobResponse:
-    job = await _get_job_or_404(job_id, user.id, db, is_admin=user.role == "admin")
+    job = await _get_job_or_404(job_id, user.id, db, is_admin=user.role == "admin", allow_org_folder=True)
     return JobResponse.model_validate(job)
 
 
@@ -197,7 +219,7 @@ async def get_transcript(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> TranscriptResponse:
-    job = await _get_job_or_404(job_id, user.id, db, is_admin=user.role == "admin")
+    job = await _get_job_or_404(job_id, user.id, db, is_admin=user.role == "admin", allow_org_folder=True)
     if job.status != JobStatus.completed:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Job is not completed")
     if not job.output_s3_keys:
@@ -286,17 +308,19 @@ async def move_to_folder(
     db: AsyncSession = Depends(get_db),
 ) -> JobResponse:
     from datetime import UTC, datetime
-    from app.models import Folder
 
-    job = await _get_job_or_404(job_id, user.id, db)
+    is_admin = user.role == "admin"
+    job = await _get_job_or_404(job_id, user.id, db, is_admin=is_admin)
     folder_id: uuid.UUID | None = body.get("folder_id")
 
     if folder_id is not None:
-        folder = (
-            await db.execute(
-                select(Folder).where(Folder.id == folder_id, Folder.user_id == user.id)
+        folder_q = select(Folder).where(Folder.id == folder_id)
+        if not is_admin:
+            # Allow personal folders owned by the user OR any org-scoped folder
+            folder_q = folder_q.where(
+                or_(Folder.user_id == user.id, Folder.scope == "org")
             )
-        ).scalar_one_or_none()
+        folder = (await db.execute(folder_q)).scalar_one_or_none()
         if folder is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Folder not found")
 

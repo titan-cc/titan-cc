@@ -2,7 +2,7 @@ import uuid
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import and_, func, or_, select, delete
+from sqlalchemy import and_, case, func, or_, select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.deps import get_current_user, get_db, require_admin
@@ -43,14 +43,21 @@ async def list_folders(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> FolderListResponse:
-    # Personal folders owned by this user + all org-scoped folders
-    # Job counts scoped to current user in all cases (Option A semantics)
+    # Personal folders owned by this user + all org-scoped folders.
+    # For personal folders: count only the caller's jobs.
+    # For org folders: count all users' jobs (org folders are shared).
     rows = await db.execute(
-        select(Folder, func.count(Job.id).label("job_count"))
-        .outerjoin(
-            Job,
-            and_(Job.folder_id == Folder.id, Job.user_id == user.id),
+        select(
+            Folder,
+            func.count(
+                case(
+                    (and_(Folder.scope == "personal", Job.user_id == user.id), Job.id),
+                    (Folder.scope == "org", Job.id),
+                    else_=None,
+                )
+            ).label("job_count"),
         )
+        .outerjoin(Job, Job.folder_id == Folder.id)
         .where(
             or_(
                 and_(Folder.user_id == user.id, Folder.scope == "personal"),
@@ -128,11 +135,10 @@ async def update_folder(
     await db.commit()
     await db.refresh(folder)
 
-    job_count = (
-        await db.execute(
-            select(func.count(Job.id)).where(Job.folder_id == folder.id, Job.user_id == user.id)
-        )
-    ).scalar_one()
+    count_q = select(func.count(Job.id)).where(Job.folder_id == folder.id)
+    if folder.scope == "personal":
+        count_q = count_q.where(Job.user_id == user.id)
+    job_count = (await db.execute(count_q)).scalar_one()
     return _to_response(folder, job_count, user.id)
 
 
