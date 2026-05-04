@@ -324,9 +324,10 @@ export default function Upload() {
       await xhrPost(upload_url, form_fields, file, setUploadPct, xhrRef);
 
       setStage("creating");
+      const freshToken = (await getToken()) ?? token;
       const jobRes = await apiFetch("/jobs", {
         method: "POST",
-        token,
+        token: freshToken,
         headers: { "Idempotency-Key": idempotencyKey },
         body: JSON.stringify({
           s3_key,
