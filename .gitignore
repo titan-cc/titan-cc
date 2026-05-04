@@ -28,6 +28,10 @@ dist/
 .idea/
 *.swp
 *.swo
+.claude/
+
+# TypeScript build cache
+*.tsbuildinfo
 
 # OS
 .DS_Store
