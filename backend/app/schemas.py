@@ -254,6 +254,8 @@ class BillingResponse(BaseModel):
 class FolderResponse(BaseModel):
     id: uuid.UUID
     name: str
+    scope: str          # 'personal' | 'org'
+    owned_by_me: bool
     created_at: datetime
     job_count: int = 0
 
@@ -266,10 +268,12 @@ class FolderListResponse(BaseModel):
 
 class FolderCreateRequest(BaseModel):
     name: Annotated[str, Field(min_length=1, max_length=100)]
+    scope: str = "personal"   # 'personal' | 'org'
 
 
-class FolderRenameRequest(BaseModel):
-    name: Annotated[str, Field(min_length=1, max_length=100)]
+class FolderUpdateRequest(BaseModel):
+    name: Annotated[str | None, Field(min_length=1, max_length=100)] = None
+    scope: str | None = None  # 'personal' | 'org'
 
 
 # ── Search ─────────────────────────────────────────────────────────────────────

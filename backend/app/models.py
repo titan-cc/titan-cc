@@ -31,6 +31,7 @@ class Folder(Base):
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
     name: Mapped[str] = mapped_column(Text, nullable=False)
+    scope: Mapped[str] = mapped_column(Text, nullable=False, default="personal")  # 'personal' | 'org'
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMPTZ, nullable=False, default=lambda: datetime.now(UTC)
     )

@@ -40,9 +40,13 @@ export interface Job {
 
 // ── Folders ───────────────────────────────────────────────────────────────────
 
+export type FolderScope = "personal" | "org";
+
 export interface Folder {
   id: string;
   name: string;
+  scope: FolderScope;
+  owned_by_me: boolean;
   created_at: string;
   job_count: number;
 }

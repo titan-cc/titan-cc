@@ -2,24 +2,40 @@ import uuid
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import func, select, delete
+from sqlalchemy import and_, func, or_, select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.deps import get_current_user, get_db, require_admin
 from app.models import Folder, Job, User
-from app.schemas import FolderCreateRequest, FolderListResponse, FolderRenameRequest, FolderResponse
+from app.schemas import FolderCreateRequest, FolderListResponse, FolderUpdateRequest, FolderResponse
 
 router = APIRouter()
 
+_VALID_SCOPES = {"personal", "org"}
 
-async def _get_folder_or_404(folder_id: uuid.UUID, user_id: uuid.UUID, db: AsyncSession) -> Folder:
-    result = await db.execute(
-        select(Folder).where(Folder.id == folder_id, Folder.user_id == user_id)
+
+def _to_response(folder: Folder, job_count: int, user_id: uuid.UUID) -> FolderResponse:
+    return FolderResponse(
+        id=folder.id,
+        name=folder.name,
+        scope=folder.scope,
+        owned_by_me=folder.user_id == user_id,
+        created_at=folder.created_at,
+        job_count=job_count,
     )
+
+
+async def _get_folder_or_404(folder_id: uuid.UUID, db: AsyncSession) -> Folder:
+    result = await db.execute(select(Folder).where(Folder.id == folder_id))
     folder = result.scalar_one_or_none()
     if folder is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Folder not found")
     return folder
+
+
+def _can_modify(folder: Folder, user: User) -> bool:
+    """Owner or admin can rename/change scope."""
+    return folder.user_id == user.id or user.role == "admin"
 
 
 @router.get("", response_model=FolderListResponse)
@@ -27,22 +43,24 @@ async def list_folders(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> FolderListResponse:
+    # Personal folders owned by this user + all org-scoped folders
+    # Job counts scoped to current user in all cases (Option A semantics)
     rows = await db.execute(
         select(Folder, func.count(Job.id).label("job_count"))
-        .outerjoin(Job, Job.folder_id == Folder.id)
-        .where(Folder.user_id == user.id)
-        .group_by(Folder.id)
-        .order_by(Folder.created_at.asc())
-    )
-    folders = [
-        FolderResponse(
-            id=f.id,
-            name=f.name,
-            created_at=f.created_at,
-            job_count=count,
+        .outerjoin(
+            Job,
+            and_(Job.folder_id == Folder.id, Job.user_id == user.id),
         )
-        for f, count in rows
-    ]
+        .where(
+            or_(
+                and_(Folder.user_id == user.id, Folder.scope == "personal"),
+                Folder.scope == "org",
+            )
+        )
+        .group_by(Folder.id)
+        .order_by(Folder.scope.asc(), Folder.created_at.asc())
+    )
+    folders = [_to_response(f, count, user.id) for f, count in rows]
     return FolderListResponse(folders=folders)
 
 
@@ -52,71 +70,78 @@ async def create_folder(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> FolderResponse:
-    # Prevent duplicate names per user
-    existing = (
-        await db.execute(
-            select(Folder).where(Folder.user_id == user.id, Folder.name == body.name)
-        )
-    ).scalar_one_or_none()
-    if existing:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="A folder with that name already exists",
-        )
+    if body.scope not in _VALID_SCOPES:
+        raise HTTPException(status_code=422, detail="scope must be 'personal' or 'org'")
 
-    folder = Folder(user_id=user.id, name=body.name)
+    # Duplicate name check: personal = per-user; org = global
+    if body.scope == "personal":
+        clash_filter = and_(Folder.user_id == user.id, Folder.scope == "personal", Folder.name == body.name)
+    else:
+        clash_filter = and_(Folder.scope == "org", Folder.name == body.name)
+
+    existing = (await db.execute(select(Folder).where(clash_filter))).scalar_one_or_none()
+    if existing:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="A folder with that name already exists")
+
+    folder = Folder(user_id=user.id, name=body.name, scope=body.scope)
     db.add(folder)
     await db.commit()
     await db.refresh(folder)
-    return FolderResponse(id=folder.id, name=folder.name, created_at=folder.created_at, job_count=0)
+    return _to_response(folder, 0, user.id)
 
 
 @router.patch("/{folder_id}", response_model=FolderResponse)
-async def rename_folder(
+async def update_folder(
     folder_id: uuid.UUID,
-    body: FolderRenameRequest,
+    body: FolderUpdateRequest,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> FolderResponse:
-    folder = await _get_folder_or_404(folder_id, user.id, db)
+    folder = await _get_folder_or_404(folder_id, db)
 
-    # Check new name doesn't clash
-    clash = (
-        await db.execute(
-            select(Folder).where(
-                Folder.user_id == user.id,
-                Folder.name == body.name,
-                Folder.id != folder_id,
+    if not _can_modify(folder, user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorised to modify this folder")
+
+    if body.scope is not None and body.scope not in _VALID_SCOPES:
+        raise HTTPException(status_code=422, detail="scope must be 'personal' or 'org'")
+
+    new_name = body.name or folder.name
+    new_scope = body.scope or folder.scope
+
+    # Clash check when renaming or changing scope
+    if new_name != folder.name or new_scope != folder.scope:
+        if new_scope == "personal":
+            clash_filter = and_(
+                Folder.user_id == user.id, Folder.scope == "personal",
+                Folder.name == new_name, Folder.id != folder_id,
             )
-        )
-    ).scalar_one_or_none()
-    if clash:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="A folder with that name already exists",
-        )
+        else:
+            clash_filter = and_(
+                Folder.scope == "org", Folder.name == new_name, Folder.id != folder_id,
+            )
+        if (await db.execute(select(Folder).where(clash_filter))).scalar_one_or_none():
+            raise HTTPException(status_code=409, detail="A folder with that name already exists")
 
-    folder.name = body.name
+    folder.name = new_name
+    folder.scope = new_scope
     folder.updated_at = datetime.now(UTC)
     await db.commit()
     await db.refresh(folder)
 
     job_count = (
-        await db.execute(select(func.count(Job.id)).where(Job.folder_id == folder.id))
+        await db.execute(
+            select(func.count(Job.id)).where(Job.folder_id == folder.id, Job.user_id == user.id)
+        )
     ).scalar_one()
-    return FolderResponse(id=folder.id, name=folder.name, created_at=folder.created_at, job_count=job_count)
+    return _to_response(folder, job_count, user.id)
 
 
 @router.delete("/{folder_id}", status_code=204)
 async def delete_folder(
     folder_id: uuid.UUID,
-    admin: User = Depends(require_admin),
+    _admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    result = await db.execute(select(Folder).where(Folder.id == folder_id))
-    folder = result.scalar_one_or_none()
-    if folder is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Folder not found")
-    # CASCADE on folder_id FK deletes all jobs in this folder
-    await db.execute(delete(Folder).where(Folder.id == folder_id))
+    folder = await _get_folder_or_404(folder_id, db)
+    await db.execute(delete(Folder).where(Folder.id == folder.id))
     await db.commit()
