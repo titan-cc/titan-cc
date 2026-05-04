@@ -429,6 +429,7 @@ function FolderPanel({
   const qc = useQueryClient();
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
+  const [newScope, setNewScope] = useState<FolderScope>("personal");
 
   const { data } = useQuery<FolderListResponse>({
     queryKey: ["folders"],
@@ -441,22 +442,28 @@ function FolderPanel({
   });
 
   const folders: Folder[] = data?.folders ?? [];
+  const myFolders = folders.filter((f) => f.scope === "personal" && f.owned_by_me);
+  const teamFolders = folders.filter((f) => f.scope === "org");
   const totalCount = folders.reduce((s, f) => s + f.job_count, 0);
 
   const { mutate: createFolder, isPending: isCreating } = useMutation({
-    mutationFn: async (name: string) => {
+    mutationFn: async ({ name, scope }: { name: string; scope: FolderScope }) => {
       const token = await getToken();
-      const res = await apiFetch("/folders", { method: "POST", token: token!, body: JSON.stringify({ name }) });
+      const res = await apiFetch("/folders", { method: "POST", token: token!, body: JSON.stringify({ name, scope }) });
       if (!res.ok) throw new Error("Failed");
       return res.json();
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["folders"] }); setCreating(false); setNewName(""); },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["folders"] });
+      setCreating(false);
+      setNewName("");
+    },
   });
 
-  const { mutate: renameFolder } = useMutation({
-    mutationFn: async ({ id, name }: { id: string; name: string }) => {
+  const { mutate: updateFolder } = useMutation({
+    mutationFn: async ({ id, name, scope }: { id: string; name?: string; scope?: FolderScope }) => {
       const token = await getToken();
-      await apiFetch(`/folders/${id}`, { method: "PATCH", token: token!, body: JSON.stringify({ name }) });
+      await apiFetch(`/folders/${id}`, { method: "PATCH", token: token!, body: JSON.stringify({ name, scope }) });
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["folders"] }),
   });
@@ -473,6 +480,25 @@ function FolderPanel({
     },
   });
 
+  const renderFolder = (folder: Folder) => (
+    <FolderEntry
+      key={folder.id}
+      id={folder.id}
+      label={folder.name}
+      count={folder.job_count}
+      icon={<FolderIcon filled={selected === folder.id} />}
+      selected={selected === folder.id}
+      onSelect={() => onSelect(folder.id)}
+      onDrop={(jobId) => onMoveJob(jobId, folder.id)}
+      isAdmin={isAdmin}
+      onDelete={() => deleteFolder(folder.id)}
+      onRename={(name) => updateFolder({ id: folder.id, name })}
+      scope={folder.scope}
+      ownedByMe={folder.owned_by_me}
+      onScopeChange={(scope) => updateFolder({ id: folder.id, scope })}
+    />
+  );
+
   return (
     <div
       className="rounded-2xl p-3 sticky top-8"
@@ -482,11 +508,6 @@ function FolderPanel({
         boxShadow: "0 4px 20px rgba(0,174,239,0.06)",
       }}
     >
-      {/* Section label */}
-      <p className="text-[10px] uppercase tracking-widest font-semibold px-3 pb-2 pt-1" style={{ color: "#B1B3B6" }}>
-        Folders
-      </p>
-
       <div className="flex flex-col gap-0.5">
         {/* All */}
         <FolderEntry
@@ -506,62 +527,85 @@ function FolderPanel({
           onDrop={(jobId) => onMoveJob(jobId, null)}
         />
 
-        {/* Divider */}
-        {folders.length > 0 && (
-          <div className="my-1.5 mx-3" style={{ borderTop: "1px solid var(--border)" }} />
+        {/* My Folders */}
+        <div className="mt-3 mb-1 px-3">
+          <p className="text-[9px] uppercase tracking-widest font-semibold" style={{ color: "#B1B3B6" }}>
+            My Folders
+          </p>
+        </div>
+        {myFolders.length === 0 && !creating && (
+          <p className="text-[11px] px-3 py-0.5 italic" style={{ color: "#B1B3B6" }}>None yet</p>
         )}
+        {myFolders.map(renderFolder)}
 
-        {/* User folders */}
-        {folders.map((folder) => (
-          <FolderEntry
-            key={folder.id}
-            id={folder.id}
-            label={folder.name}
-            count={folder.job_count}
-            icon={<FolderIcon filled={selected === folder.id} />}
-            selected={selected === folder.id}
-            onSelect={() => onSelect(folder.id)}
-            onDrop={(jobId) => onMoveJob(jobId, folder.id)}
-            isAdmin={isAdmin}
-            onDelete={() => deleteFolder(folder.id)}
-            onRename={(name) => renameFolder({ id: folder.id, name })}
-          />
-        ))}
+        {/* Team Folders */}
+        <div className="mt-3 mb-1 px-3">
+          <p className="text-[9px] uppercase tracking-widest font-semibold" style={{ color: "#B1B3B6" }}>
+            Team Folders
+          </p>
+        </div>
+        {teamFolders.length === 0 && (
+          <p className="text-[11px] px-3 py-0.5 italic" style={{ color: "#B1B3B6" }}>None yet</p>
+        )}
+        {teamFolders.map(renderFolder)}
 
         {/* Divider */}
-        <div className="my-1.5 mx-3" style={{ borderTop: "1px solid var(--border)" }} />
+        <div className="my-2 mx-3" style={{ borderTop: "1px solid var(--border)" }} />
 
         {/* New folder */}
         {creating ? (
           <form
-            className="flex items-center gap-2 px-3 py-2"
+            className="flex flex-col gap-2 px-3 py-2"
             onSubmit={(e) => {
               e.preventDefault();
-              if (newName.trim()) createFolder(newName.trim());
+              if (newName.trim()) createFolder({ name: newName.trim(), scope: newScope });
             }}
           >
-            <input
-              autoFocus
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              onBlur={() => { if (!isCreating) { setCreating(false); setNewName(""); } }}
-              placeholder="Folder name"
-              className="flex-1 text-sm bg-transparent outline-none"
-              style={{ color: "var(--text-primary)" }}
-            />
-            <button
-              type="submit"
-              disabled={isCreating || !newName.trim()}
-              className="text-xs font-semibold px-2 py-0.5 rounded-lg text-white shrink-0"
-              style={{ backgroundColor: "#00AEEF", opacity: isCreating ? 0.6 : 1 }}
+            {/* Scope toggle */}
+            <div
+              className="flex p-0.5 rounded-lg"
+              style={{ backgroundColor: "var(--surface-subtle)", border: "1px solid var(--border)" }}
             >
-              {isCreating ? "…" : "Add"}
-            </button>
+              {(["personal", "org"] as FolderScope[]).map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => setNewScope(s)}
+                  className="flex-1 flex items-center justify-center gap-1 py-1 rounded-md text-[10px] font-semibold transition-all duration-150"
+                  style={
+                    newScope === s
+                      ? { backgroundColor: "#00AEEF", color: "#fff" }
+                      : { color: "var(--text-tertiary)" }
+                  }
+                >
+                  {s === "personal" ? <><LockIcon />&nbsp;Personal</> : <><GlobeIcon />&nbsp;Team</>}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                autoFocus
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                onBlur={() => { if (!isCreating) { setCreating(false); setNewName(""); } }}
+                placeholder="Folder name"
+                className="flex-1 text-sm bg-transparent outline-none"
+                style={{ color: "var(--text-primary)" }}
+              />
+              <button
+                type="submit"
+                disabled={isCreating || !newName.trim()}
+                className="text-xs font-semibold px-2 py-0.5 rounded-lg text-white shrink-0"
+                style={{ backgroundColor: "#00AEEF", opacity: isCreating ? 0.6 : 1 }}
+              >
+                {isCreating ? "…" : "Add"}
+              </button>
+            </div>
           </form>
         ) : (
           <button
             onClick={() => setCreating(true)}
-            className="flex items-center gap-2 px-3 py-2 rounded-xl w-full text-left transition-all duration-150 group/new"
+            className="flex items-center gap-2 px-3 py-2 rounded-xl w-full text-left transition-all duration-150"
             style={{ color: "#B1B3B6" }}
             onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "#00AEEF"; }}
             onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "#B1B3B6"; }}
