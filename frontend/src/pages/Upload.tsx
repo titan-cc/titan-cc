@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useBlocker, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "@clerk/clerk-react";
 import { useQuery } from "@tanstack/react-query";
 import { apiFetch } from "@/api/client";
@@ -187,15 +187,42 @@ export default function Upload() {
 
   const busy = stage === "uploading" || stage === "creating";
 
-  // Block in-app navigation during an active upload
-  const blocker = useBlocker(busy);
-
   // Block tab close / refresh during an active upload
   useEffect(() => {
     if (!busy) return;
     const handler = (e: BeforeUnloadEvent) => { e.preventDefault(); };
     window.addEventListener("beforeunload", handler);
     return () => window.removeEventListener("beforeunload", handler);
+  }, [busy]);
+
+  // Block in-app navigation during an active upload.
+  // useBlocker requires a data router (createBrowserRouter), so we patch
+  // history.pushState directly — works with BrowserRouter.
+  useEffect(() => {
+    if (!busy) return;
+
+    const origPush = history.pushState.bind(history);
+
+    (history as History).pushState = (...args: Parameters<typeof history.pushState>) => {
+      if (window.confirm("Upload in progress. Leaving now will cancel the upload. Leave anyway?")) {
+        xhrRef.current?.abort();
+        origPush(...args);
+      }
+    };
+
+    const onPopState = () => {
+      if (!window.confirm("Upload in progress. Leaving now will cancel the upload. Leave anyway?")) {
+        history.pushState(null, "", location.href);
+      } else {
+        xhrRef.current?.abort();
+      }
+    };
+
+    window.addEventListener("popstate", onPopState);
+    return () => {
+      (history as History).pushState = origPush;
+      window.removeEventListener("popstate", onPopState);
+    };
   }, [busy]);
 
   const { data: workerStatus } = useQuery<WorkerStatus>({
@@ -307,54 +334,6 @@ export default function Upload() {
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-[1fr_240px] gap-10 items-start">
-
-      {/* Navigation-away confirmation dialog */}
-      {blocker.state === "blocked" && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4"
-          style={{ backgroundColor: "rgba(0,0,0,0.6)" }}
-        >
-          <div
-            className="w-full max-w-sm rounded-2xl p-6 space-y-4"
-            style={{ backgroundColor: "var(--surface)", border: "1px solid var(--border)" }}
-          >
-            <div>
-              <h2 className="text-[16px] font-semibold" style={{ color: "var(--text-primary)" }}>
-                Upload in progress
-              </h2>
-              <p className="text-[13px] mt-1.5" style={{ color: "var(--text-secondary)" }}>
-                Leaving now will cancel the upload. Your file will not be transcribed.
-              </p>
-            </div>
-            <div className="flex gap-3">
-              <button
-                onClick={() => blocker.reset()}
-                className="flex-1 py-2 rounded-xl text-[13px] font-semibold transition-ui"
-                style={{
-                  backgroundColor: "var(--brand)",
-                  color: "#fff",
-                }}
-              >
-                Stay
-              </button>
-              <button
-                onClick={() => {
-                  xhrRef.current?.abort();
-                  blocker.proceed();
-                }}
-                className="flex-1 py-2 rounded-xl text-[13px] font-medium transition-ui"
-                style={{
-                  backgroundColor: "rgba(255,255,255,0.06)",
-                  color: "var(--text-secondary)",
-                  border: "1px solid var(--border)",
-                }}
-              >
-                Leave anyway
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Left: main upload area */}
       <div>
