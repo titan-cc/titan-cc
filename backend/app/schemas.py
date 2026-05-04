@@ -53,6 +53,7 @@ class JobCreateRequest(BaseModel):
     filename: str | None = None
     duration_seconds: int = Field(gt=0)
     config: JobConfig = Field(default_factory=JobConfig)
+    folder_id: uuid.UUID | None = None
 
 
 class JobResponse(BaseModel):

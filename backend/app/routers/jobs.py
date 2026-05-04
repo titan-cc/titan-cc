@@ -101,6 +101,16 @@ async def create_job(
     await check_quota(user.quota, body.duration_seconds, db)
     await check_concurrent(user.quota, user.id, db)
 
+    folder_id: uuid.UUID | None = body.folder_id
+    if folder_id is not None:
+        folder_q = select(Folder).where(Folder.id == folder_id)
+        if user.role != "admin":
+            folder_q = folder_q.where(
+                or_(Folder.user_id == user.id, Folder.scope == "org")
+            )
+        if (await db.execute(folder_q)).scalar_one_or_none() is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Folder not found")
+
     job = Job(
         user_id=user.id,
         input_s3_key=body.s3_key,
@@ -108,6 +118,7 @@ async def create_job(
         input_duration_seconds=body.duration_seconds,
         config=body.config.model_dump(),
         status=JobStatus.queued,
+        folder_id=folder_id,
     )
     db.add(job)
     await db.flush()
@@ -271,11 +282,13 @@ async def update_transcript(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> TranscriptResponse:
-    job = await _get_job_or_404(job_id, user.id, db)
+    job = await _get_job_or_404(job_id, user.id, db, is_admin=user.role == "admin", allow_org_folder=True)
     if job.status != JobStatus.completed:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Job is not completed")
     if not job.output_s3_keys:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No transcript available")
+
+    from datetime import UTC, datetime
 
     segs = [s.model_dump(exclude_none=False) for s in body.segments]
     job_id_str = str(job_id)
@@ -290,6 +303,13 @@ async def update_transcript(
         if fmt in format_bytes:
             content, content_type = format_bytes[fmt]
             s3_service.put_bytes(s3_key, content, content_type)
+
+    # Keep transcript_text in sync so full-text search stays fresh
+    txt_entry = format_bytes.get("txt")
+    if txt_entry:
+        job.transcript_text = txt_entry[0].decode("utf-8")
+        job.updated_at = datetime.now(UTC)
+        await db.commit()
 
     downloads: dict[str, DownloadLink] = {}
     for fmt, s3_key in job.output_s3_keys.items():
@@ -405,3 +425,16 @@ async def cancel_job(
         await cancel_runpod_job(runpod_job_id)
 
     return JobResponse.model_validate(job)
+
+
+@router.delete("/{job_id}", status_code=204)
+async def delete_job(
+    job_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    is_admin = user.role == "admin"
+    job = await _get_job_or_404(job_id, user.id, db, is_admin=is_admin)
+    await db.delete(job)
+    await log_activity(db, user.id, "job_deleted", metadata={"job_id": str(job_id)})
+    await db.commit()

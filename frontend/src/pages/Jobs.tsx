@@ -645,9 +645,10 @@ interface JobRowProps {
   onDragEnd: () => void;
   showUser?: boolean;
   onContextMenu?: (e: React.MouseEvent, jobId: string, currentFolderId: string | null) => void;
+  onDelete?: (id: string) => void;
 }
 
-function JobTableRow({ job, selected, onSelect, isDragging, onDragStart, onDragEnd, showUser, onContextMenu }: JobRowProps) {
+function JobTableRow({ job, selected, onSelect, isDragging, onDragStart, onDragEnd, showUser, onContextMenu, onDelete }: JobRowProps) {
   const [hovered, setHovered] = useState(false);
   const isActive = ["queued", "dispatched", "processing"].includes(job.status);
   const to = job.status === "completed" ? `/jobs/${job.id}/transcript` : `/jobs/${job.id}`;
@@ -763,11 +764,27 @@ function JobTableRow({ job, selected, onSelect, isDragging, onDragStart, onDragE
         </span>
       </div>
 
-      {/* Edited (time-ago) */}
-      <div className="hidden md:block pr-2">
+      {/* Edited (time-ago) + hover delete */}
+      <div className="hidden md:flex items-center justify-between pr-2 gap-1">
         <span className="text-[12px] tabular-nums" style={{ color: "#777878" }}>
           {timeAgo(job.created_at)}
         </span>
+        {hovered && onDelete && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              e.preventDefault();
+              if (window.confirm("Delete this transcript? This cannot be undone.")) onDelete(job.id);
+            }}
+            className="p-1.5 rounded-lg transition-colors shrink-0"
+            title="Delete transcript"
+            style={{ color: "#B1B3B6" }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "#EC008C"; }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "#B1B3B6"; }}
+          >
+            <TrashIcon />
+          </button>
+        )}
       </div>
     </div>
   );
@@ -838,6 +855,7 @@ function Toolbar({
 }: ToolbarProps) {
   const hasSelection = selectedIds.size > 0;
   const hasFolder = [...selectedIds].some((id) => folderIds.has(id));
+  const hasJobSelection = [...selectedIds].some((id) => !folderIds.has(id));
   const singleFolder = hasSelection && hasFolder && selectedIds.size === 1 && folderIds.has([...selectedIds][0]);
 
   const btnBase: React.CSSProperties = {
@@ -892,8 +910,8 @@ function Toolbar({
           </button>
         )}
 
-        {/* Delete — when anything selected AND (admin OR it's a non-folder) */}
-        {hasSelection && isAdmin && (
+        {/* Delete — jobs: any user; folders: admin only */}
+        {(hasJobSelection || (hasFolder && isAdmin)) && (
           <button
             onClick={onDeleteSelected}
             style={btnDanger}
@@ -973,11 +991,13 @@ function ContextMenu({
   folders,
   onMove,
   onClose,
+  onDelete,
 }: {
   state: ContextMenuState;
   folders: Folder[];
   onMove: (jobId: string, folderId: string | null) => void;
   onClose: () => void;
+  onDelete: (jobId: string) => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
 
@@ -1100,6 +1120,31 @@ function ContextMenu({
           </button>
         </>
       )}
+
+      {/* Delete transcript */}
+      <div style={{ borderTop: "1px solid var(--border)" }} />
+      <button
+        onClick={() => { onDelete(state.jobId); onClose(); }}
+        className="w-full flex items-center gap-2.5 px-3 py-2.5 text-sm text-left transition-colors duration-100"
+        style={{
+          color: "var(--text-secondary)",
+          cursor: "pointer",
+          backgroundColor: "transparent",
+          border: "none",
+          fontFamily: "inherit",
+        }}
+        onMouseEnter={(e) => {
+          (e.currentTarget as HTMLElement).style.backgroundColor = "rgba(236,0,140,0.05)";
+          (e.currentTarget as HTMLElement).style.color = "#EC008C";
+        }}
+        onMouseLeave={(e) => {
+          (e.currentTarget as HTMLElement).style.backgroundColor = "transparent";
+          (e.currentTarget as HTMLElement).style.color = "var(--text-secondary)";
+        }}
+      >
+        <span style={{ flexShrink: 0 }}><TrashIcon /></span>
+        <span className="font-medium">Delete transcript</span>
+      </button>
     </div>
   );
 }
@@ -1151,6 +1196,7 @@ interface DriveTableProps {
   onDropJob: (jobId: string, folderId: string | null) => void;
   isAdmin: boolean;
   onDeleteFolder: (id: string) => void;
+  onDeleteJob: (id: string) => void;
   onRenameFolder: (id: string, name: string) => void;
   onScopeChange: (id: string, scope: FolderScope) => void;
   renamingFolderId: string | null;
@@ -1161,7 +1207,7 @@ interface DriveTableProps {
 
 function DriveTable({
   tab, folderFilter, folders, selectedIds, onSelect, onToggleAll,
-  onNavigateFolder, onDropJob, isAdmin, onDeleteFolder, onRenameFolder, onScopeChange,
+  onNavigateFolder, onDropJob, isAdmin, onDeleteFolder, onDeleteJob, onRenameFolder, onScopeChange,
   renamingFolderId, onStartRename, onCancelRename, onJobContextMenu,
 }: DriveTableProps) {
   const { getToken } = useAuth();
@@ -1322,6 +1368,7 @@ function DriveTable({
             onDragEnd={() => setDraggingId(null)}
             showUser={tab === "all"}
             onContextMenu={onJobContextMenu}
+            onDelete={onDeleteJob}
           />
         ))
       )}
@@ -1414,6 +1461,20 @@ export default function Jobs() {
     },
   });
 
+  const { mutate: deleteJob } = useMutation({
+    mutationFn: async (id: string) => {
+      const token = await getToken();
+      await apiFetch(`/jobs/${id}`, { method: "DELETE", token: token! });
+    },
+    onSuccess: (_, id) => {
+      qc.invalidateQueries({ queryKey: ["jobs"] });
+      qc.invalidateQueries({ queryKey: ["admin-jobs"] });
+      qc.invalidateQueries({ queryKey: ["folders"] });
+      setSelectedIds((prev) => { const s = new Set(prev); s.delete(id); return s; });
+      setToast({ message: "Transcript deleted", type: "success" });
+    },
+  });
+
   const { mutate: moveJob } = useMutation({
     mutationFn: async ({ jobId, folderId }: { jobId: string; folderId: string | null }) => {
       const token = await getToken();
@@ -1462,11 +1523,20 @@ export default function Jobs() {
 
   function handleDeleteSelected() {
     const selectedFolderIds = [...selectedIds].filter((id) => folderIdSet.has(id));
-    if (selectedFolderIds.length === 0) return;
-    const names = selectedFolderIds.map((id) => folders.find((f) => f.id === id)?.name ?? id).join(", ");
-    if (confirm(`Delete ${selectedFolderIds.length === 1 ? `folder "${names}"` : `${selectedFolderIds.length} folders`} and all their transcripts?`)) {
-      selectedFolderIds.forEach((id) => deleteFolder(id));
-      setSelectedIds(new Set());
+    const selectedJobIds = [...selectedIds].filter((id) => !folderIdSet.has(id));
+
+    if (selectedFolderIds.length > 0 && isAdmin) {
+      const names = selectedFolderIds.map((id) => folders.find((f) => f.id === id)?.name ?? id).join(", ");
+      if (window.confirm(`Delete ${selectedFolderIds.length === 1 ? `folder "${names}"` : `${selectedFolderIds.length} folders`} and all their transcripts?`)) {
+        selectedFolderIds.forEach((id) => deleteFolder(id));
+      }
+    }
+
+    if (selectedJobIds.length > 0) {
+      const label = selectedJobIds.length === 1 ? "this transcript" : `${selectedJobIds.length} transcripts`;
+      if (window.confirm(`Delete ${label}? This cannot be undone.`)) {
+        selectedJobIds.forEach((id) => deleteJob(id));
+      }
     }
   }
 
@@ -1583,6 +1653,7 @@ export default function Jobs() {
           onDropJob={handleDropJob}
           isAdmin={!!isAdmin}
           onDeleteFolder={(id) => deleteFolder(id)}
+          onDeleteJob={(id) => deleteJob(id)}
           onRenameFolder={(id, name) => { updateFolder({ id, name }); setRenamingFolderId(null); }}
           onScopeChange={(id, scope) => updateFolder({ id, scope })}
           renamingFolderId={renamingFolderId}
@@ -1602,6 +1673,9 @@ export default function Jobs() {
           folders={folders}
           onMove={handleDropJob}
           onClose={() => setContextMenu(null)}
+          onDelete={(jobId) => {
+            if (window.confirm("Delete this transcript? This cannot be undone.")) deleteJob(jobId);
+          }}
         />
       )}
 

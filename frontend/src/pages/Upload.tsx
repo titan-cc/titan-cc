@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "@clerk/clerk-react";
 import { useQuery } from "@tanstack/react-query";
 import { apiFetch } from "@/api/client";
-import type { PresignResponse, Job, UserMeResponse } from "@/api/types";
+import type { Folder, FolderListResponse, PresignResponse, Job, UserMeResponse } from "@/api/types";
 
 interface WorkerStatus {
   warm: boolean;
@@ -184,6 +184,7 @@ export default function Upload() {
   const [dragging, setDragging] = useState(false);
   const [uploadPct, setUploadPct] = useState(0);
   const [warmingUp, setWarmingUp] = useState(false);
+  const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
 
   const busy = stage === "uploading" || stage === "creating";
 
@@ -247,8 +248,9 @@ export default function Upload() {
     }
   };
 
-  // Stop warmup spinner once worker is detected as warm
-  if (warmingUp && workerStatus?.warm) setWarmingUp(false);
+  useEffect(() => {
+    if (warmingUp && workerStatus?.warm) setWarmingUp(false);
+  }, [warmingUp, workerStatus?.warm]);
 
   const { data: me } = useQuery<UserMeResponse>({
     queryKey: ["me"],
@@ -259,6 +261,17 @@ export default function Upload() {
     },
     staleTime: 60_000,
   });
+
+  const { data: foldersData } = useQuery<FolderListResponse>({
+    queryKey: ["folders"],
+    queryFn: async () => {
+      const token = await getToken();
+      const res = await apiFetch("/folders", { token: token! });
+      return res.json();
+    },
+    staleTime: 30_000,
+  });
+  const folders: Folder[] = foldersData?.folders ?? [];
 
   const handleFile = useCallback(async (file: File) => {
     setStage("idle");
@@ -320,6 +333,7 @@ export default function Upload() {
           filename: file.name,
           duration_seconds: durationSeconds,
           config: { language: "en", enable_diarization: false, output_formats: ["json", "srt", "txt"] },
+          ...(selectedFolderId ? { folder_id: selectedFolderId } : {}),
         }),
       });
       const job = (await jobRes.json()) as Job;
@@ -506,6 +520,44 @@ export default function Upload() {
         {/* Error */}
         {stage === "error" && errorMsg && (
           <p className="mt-3 text-sm font-medium" style={{ color: "var(--status-failed)" }}>{errorMsg}</p>
+        )}
+
+        {/* Folder selector */}
+        {(stage === "ready" || stage === "error") && fileInfo && (
+          <div className="mt-4">
+            <label className="block text-xs font-semibold uppercase tracking-widest mb-2" style={{ color: "var(--text-tertiary)" }}>
+              Save to folder
+            </label>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => setSelectedFolderId(null)}
+                className="px-3 py-1.5 rounded-lg text-xs font-medium transition-ui border"
+                style={
+                  selectedFolderId === null
+                    ? { backgroundColor: "var(--brand)", color: "#fff", borderColor: "var(--brand)" }
+                    : { backgroundColor: "transparent", color: "var(--text-secondary)", borderColor: "var(--border)" }
+                }
+              >
+                Unfiled
+              </button>
+              {folders.map((f) => (
+                <button
+                  key={f.id}
+                  type="button"
+                  onClick={() => setSelectedFolderId(f.id)}
+                  className="px-3 py-1.5 rounded-lg text-xs font-medium transition-ui border"
+                  style={
+                    selectedFolderId === f.id
+                      ? { backgroundColor: "var(--brand)", color: "#fff", borderColor: "var(--brand)" }
+                      : { backgroundColor: "transparent", color: "var(--text-secondary)", borderColor: "var(--border)" }
+                  }
+                >
+                  {f.name}
+                </button>
+              ))}
+            </div>
+          </div>
         )}
 
         {/* Submit */}
