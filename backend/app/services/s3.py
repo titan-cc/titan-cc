@@ -90,3 +90,12 @@ def put_bytes(s3_key: str, body: bytes, content_type: str) -> None:
         Body=body,
         ContentType=content_type,
     )
+
+
+def get_text(s3_key: str, max_bytes: int = 5_000_000) -> str:
+    """Download a text object from S3 and return its content as a string.
+
+    Capped at max_bytes to prevent unbounded memory usage on huge transcripts.
+    """
+    obj = _client().get_object(Bucket=settings.s3_bucket, Key=s3_key)
+    return obj["Body"].read(max_bytes).decode("utf-8", errors="replace")

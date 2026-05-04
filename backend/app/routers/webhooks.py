@@ -33,6 +33,7 @@ from app.schemas import (
 )
 from app.services.activity import log_activity
 from app.services.email import send_job_completed_email, send_job_failed_email
+from app.services import s3 as s3_service
 
 logger = structlog.get_logger()
 router = APIRouter()
@@ -135,6 +136,14 @@ async def _handle_completed(job: Job, payload: dict[str, Any], db: AsyncSession)
         job_id=job.id, event_type="completed",
         from_status=JobStatus.processing, to_status=JobStatus.completed,
     ))
+
+    # Pull transcript text from S3 for full-text search indexing
+    txt_key = p.output_s3_keys.get("txt")
+    if txt_key:
+        try:
+            job.transcript_text = s3_service.get_text(txt_key)
+        except Exception:
+            logger.warning("transcript_text_fetch_failed", job_id=str(job.id))
 
     # Increment quota usage atomically
     minutes = math.ceil(job.input_duration_seconds / 60)

@@ -23,6 +23,25 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db import Base
 
 
+class Folder(Base):
+    __tablename__ = "folders"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMPTZ, nullable=False, default=lambda: datetime.now(UTC)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        TIMESTAMPTZ, nullable=False, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC)
+    )
+
+    user: Mapped["User"] = relationship("User", back_populates="folders")
+    jobs: Mapped[list["Job"]] = relationship("Job", back_populates="folder")
+
+
 class JobStatus(str, enum.Enum):
     queued = "queued"
     dispatched = "dispatched"
@@ -58,6 +77,7 @@ class User(Base):
 
     quota: Mapped["Quota"] = relationship("Quota", back_populates="user", uselist=False)
     jobs: Mapped[list["Job"]] = relationship("Job", back_populates="user")
+    folders: Mapped[list["Folder"]] = relationship("Folder", back_populates="user")
     notifications: Mapped[list["Notification"]] = relationship(
         "Notification", back_populates="user"
     )
@@ -111,6 +131,10 @@ class Job(Base):
     failure_details: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     max_retries: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
+    folder_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("folders.id", ondelete="CASCADE"), nullable=True
+    )
+    transcript_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     cost_usd: Mapped[float | None] = mapped_column(Numeric(10, 4), nullable=True)
     expires_at: Mapped[datetime] = mapped_column(
         TIMESTAMPTZ,
@@ -131,6 +155,7 @@ class Job(Base):
     )
 
     user: Mapped["User"] = relationship("User", back_populates="jobs")
+    folder: Mapped["Folder | None"] = relationship("Folder", back_populates="jobs")
     events: Mapped[list["JobEvent"]] = relationship("JobEvent", back_populates="job")
     notifications: Mapped[list["Notification"]] = relationship("Notification", back_populates="job")
 

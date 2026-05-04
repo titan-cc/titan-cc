@@ -19,6 +19,7 @@ from app.models import Job, Quota, User, UserActivityLog
 from app.schemas import (
     ActivityLogEntry,
     ActivityLogResponse,
+    ActivityStatsResponse,
     AdminJobListResponse,
     AdminJobResponse,
     AdminUserListResponse,
@@ -383,6 +384,56 @@ async def refresh_quota(
 
     logger.info("admin_refreshed_quota", admin_id=str(admin.id), target_user_id=str(user_id))
     return QuotaResponse.model_validate(quota)
+
+
+# ── Activity stats endpoint ───────────────────────────────────────────────────
+
+@router.get("/activity/stats", response_model=ActivityStatsResponse)
+async def get_activity_stats(
+    start: datetime | None = None,
+    end: datetime | None = None,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> Any:
+    from app.models import JobStatus
+
+    # Default: all time
+    completed_q = select(func.coalesce(func.sum(Job.input_duration_seconds), 0)).where(
+        Job.status == JobStatus.completed
+    )
+    submitted_q = select(func.count(Job.id))
+    failed_q = select(func.count(Job.id)).where(Job.status == JobStatus.failed)
+
+    if start:
+        start_utc = start.replace(tzinfo=UTC) if start.tzinfo is None else start
+        completed_q = completed_q.where(Job.completed_at >= start_utc)
+        submitted_q = submitted_q.where(Job.created_at >= start_utc)
+        failed_q = failed_q.where(Job.updated_at >= start_utc)
+    if end:
+        end_utc = end.replace(tzinfo=UTC) if end.tzinfo is None else end
+        completed_q = completed_q.where(Job.completed_at <= end_utc)
+        submitted_q = submitted_q.where(Job.created_at <= end_utc)
+        failed_q = failed_q.where(Job.updated_at <= end_utc)
+
+    completed_count_q = select(func.count(Job.id)).where(Job.status == JobStatus.completed)
+    if start:
+        completed_count_q = completed_count_q.where(Job.completed_at >= start_utc)  # type: ignore[possibly-undefined]
+    if end:
+        completed_count_q = completed_count_q.where(Job.completed_at <= end_utc)  # type: ignore[possibly-undefined]
+
+    total_seconds, submitted, failed, completed = await asyncio.gather(
+        db.execute(completed_q),
+        db.execute(submitted_q),
+        db.execute(failed_q),
+        db.execute(completed_count_q),
+    )
+
+    return ActivityStatsResponse(
+        hours_transcribed=round((total_seconds.scalar() or 0) / 3600, 2),
+        jobs_completed=completed.scalar() or 0,
+        jobs_submitted=submitted.scalar() or 0,
+        jobs_failed=failed.scalar() or 0,
+    )
 
 
 # ── Activity log endpoint ─────────────────────────────────────────────────────

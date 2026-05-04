@@ -26,6 +26,7 @@ export interface Job {
   input_filename: string | null;
   input_duration_seconds: number;
   config: Record<string, unknown>;
+  folder_id: string | null;
   failure_class: FailureClass | null;
   failure_code: string | null;
   failure_message: string | null;
@@ -35,6 +36,36 @@ export interface Job {
   started_at: string | null;
   completed_at: string | null;
   expires_at: string;
+}
+
+// ── Folders ───────────────────────────────────────────────────────────────────
+
+export interface Folder {
+  id: string;
+  name: string;
+  created_at: string;
+  job_count: number;
+}
+
+export interface FolderListResponse {
+  folders: Folder[];
+}
+
+// ── Search ────────────────────────────────────────────────────────────────────
+
+export interface SearchHit {
+  job_id: string;
+  input_filename: string | null;
+  folder_id: string | null;
+  folder_name: string | null;
+  snippet: string;
+  created_at: string;
+  status: JobStatus;
+}
+
+export interface SearchResponse {
+  hits: SearchHit[];
+  query: string;
 }
 
 export interface JobListResponse {
@@ -163,4 +194,11 @@ export interface ActivityLogEntry {
 export interface ActivityLogResponse {
   events: ActivityLogEntry[];
   next_cursor: number | null;
+}
+
+export interface ActivityStatsResponse {
+  hours_transcribed: number;
+  jobs_completed: number;
+  jobs_submitted: number;
+  jobs_failed: number;
 }

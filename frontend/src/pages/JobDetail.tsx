@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { apiFetch } from "@/api/client";
 import { useTranscript } from "@/api/hooks";
-import type { Job } from "@/api/types";
+import type { Folder, FolderListResponse, Job } from "@/api/types";
 import StatusBadge from "@/components/StatusBadge";
 import ProgressBar from "@/components/ProgressBar";
 import { isTerminal } from "@/lib/poll";
@@ -47,6 +47,58 @@ function MetaRow({ label, value }: { label: string; value: React.ReactNode }) {
         {label}
       </span>
       <span className="text-sm text-right font-mono tabular-nums" style={{ color: "var(--text-primary)" }}>{value}</span>
+    </div>
+  );
+}
+
+function MoveToFolder({ job }: { job: Job }) {
+  const { getToken } = useAuth();
+  const qc = useQueryClient();
+
+  const { data } = useQuery<FolderListResponse>({
+    queryKey: ["folders"],
+    queryFn: async () => {
+      const token = await getToken();
+      const res = await apiFetch("/folders", { token: token! });
+      return res.json();
+    },
+    staleTime: 30_000,
+  });
+
+  const { mutate } = useMutation({
+    mutationFn: async (folderId: string | null) => {
+      const token = await getToken();
+      await apiFetch(`/jobs/${job.id}/folder`, {
+        method: "PATCH",
+        token: token!,
+        body: JSON.stringify({ folder_id: folderId }),
+      });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["job", job.id] });
+      qc.invalidateQueries({ queryKey: ["jobs"] });
+      qc.invalidateQueries({ queryKey: ["folders"] });
+    },
+  });
+
+  const folders: Folder[] = data?.folders ?? [];
+
+  return (
+    <div className="flex items-start justify-between py-3 gap-6" style={{ borderBottom: "1px solid var(--border)" }}>
+      <span className="text-xs font-medium uppercase tracking-wide shrink-0 pt-1.5" style={{ color: "var(--text-tertiary)" }}>
+        Folder
+      </span>
+      <select
+        value={job.folder_id ?? ""}
+        onChange={(e) => mutate(e.target.value || null)}
+        className="text-sm text-right bg-transparent border-none outline-none cursor-pointer"
+        style={{ color: "var(--text-primary)", fontFamily: "inherit" }}
+      >
+        <option value="">Unfiled</option>
+        {folders.map((f) => (
+          <option key={f.id} value={f.id}>{f.name}</option>
+        ))}
+      </select>
     </div>
   );
 }
@@ -424,6 +476,7 @@ export default function JobDetail() {
         <MetaRow label="Duration" value={formatDuration(job.input_duration_seconds)} />
         <MetaRow label="Retries" value={job.retry_count} />
         <MetaRow label="Expires" value={formatDate(job.expires_at)} />
+        <MoveToFolder job={job} />
 
         {/* Timeline */}
         <JobTimeline job={job} />

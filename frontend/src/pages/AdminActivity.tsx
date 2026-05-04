@@ -1,8 +1,61 @@
 import { useState } from "react";
 import { useAuth } from "@clerk/clerk-react";
-import { useInfiniteQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { apiFetch } from "@/api/client";
-import type { ActivityLogEntry, ActivityLogResponse } from "@/api/types";
+import type { ActivityLogEntry, ActivityLogResponse, ActivityStatsResponse } from "@/api/types";
+
+// ── Date range ────────────────────────────────────────────────────────────────
+
+type Preset = "today" | "yesterday" | "7d" | "30d" | "month" | "all";
+
+interface DateRange {
+  start: Date | null;
+  end: Date | null;
+}
+
+const PRESETS: { value: Preset; label: string }[] = [
+  { value: "today",     label: "Today" },
+  { value: "yesterday", label: "Yesterday" },
+  { value: "7d",        label: "Last 7 days" },
+  { value: "30d",       label: "Last 30 days" },
+  { value: "month",     label: "This month" },
+  { value: "all",       label: "All time" },
+];
+
+function presetToRange(preset: Preset): DateRange {
+  const now = new Date();
+  const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const endOfDay   = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999);
+
+  switch (preset) {
+    case "today":
+      return { start: startOfDay(now), end: endOfDay(now) };
+    case "yesterday": {
+      const y = new Date(now); y.setDate(now.getDate() - 1);
+      return { start: startOfDay(y), end: endOfDay(y) };
+    }
+    case "7d": {
+      const s = new Date(now); s.setDate(now.getDate() - 6);
+      return { start: startOfDay(s), end: endOfDay(now) };
+    }
+    case "30d": {
+      const s = new Date(now); s.setDate(now.getDate() - 29);
+      return { start: startOfDay(s), end: endOfDay(now) };
+    }
+    case "month":
+      return { start: new Date(now.getFullYear(), now.getMonth(), 1), end: endOfDay(now) };
+    case "all":
+      return { start: null, end: null };
+  }
+}
+
+function toInputValue(d: Date | null): string {
+  if (!d) return "";
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
 
 // ── Event metadata ─────────────────────────────────────────────────────────────
 
@@ -85,6 +138,51 @@ function describeEvent(e: ActivityLogEntry): string {
   }
 }
 
+// ── Stats strip ───────────────────────────────────────────────────────────────
+
+function StatCard({
+  label,
+  value,
+  sub,
+  loading,
+}: {
+  label: string;
+  value: string;
+  sub?: string;
+  loading: boolean;
+}) {
+  return (
+    <div
+      className="flex-1 min-w-[140px] rounded-2xl px-5 py-4"
+      style={{ backgroundColor: "var(--surface)", border: "1px solid var(--border)" }}
+    >
+      <p className="text-[11px] font-medium uppercase tracking-wide mb-1" style={{ color: "var(--text-tertiary)" }}>
+        {label}
+      </p>
+      {loading ? (
+        <div className="h-7 w-24 rounded-lg animate-pulse" style={{ backgroundColor: "rgba(255,255,255,0.07)" }} />
+      ) : (
+        <>
+          <p className="text-[26px] font-bold tabular-nums leading-none" style={{ color: "var(--text-primary)" }}>
+            {value}
+          </p>
+          {sub && (
+            <p className="text-[11px] mt-1" style={{ color: "var(--text-tertiary)" }}>{sub}</p>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function formatHours(h: number): string {
+  if (h < 0.01) return "0h";
+  if (h < 1) return `${Math.round(h * 60)}m`;
+  const whole = Math.floor(h);
+  const mins = Math.round((h - whole) * 60);
+  return mins > 0 ? `${whole}h ${mins}m` : `${whole}h`;
+}
+
 // ── Event row ─────────────────────────────────────────────────────────────────
 
 function EventRow({ event }: { event: ActivityLogEntry }) {
@@ -100,15 +198,9 @@ function EventRow({ event }: { event: ActivityLogEntry }) {
       onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = "rgba(255,255,255,0.025)"; }}
       onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = ""; }}
     >
-      {/* Dot */}
       <div className="mt-[5px] shrink-0">
-        <span
-          className="block h-2 w-2 rounded-full"
-          style={{ backgroundColor: meta.dot }}
-        />
+        <span className="block h-2 w-2 rounded-full" style={{ backgroundColor: meta.dot }} />
       </div>
-
-      {/* Main */}
       <div className="flex-1 min-w-0">
         <div className="flex items-baseline gap-2 flex-wrap">
           <span
@@ -130,8 +222,6 @@ function EventRow({ event }: { event: ActivityLogEntry }) {
           {describeEvent(event)}
         </p>
       </div>
-
-      {/* Time */}
       <div className="shrink-0 text-right">
         <p
           className="text-[11px] tabular-nums"
@@ -172,12 +262,8 @@ function FilterBar({ value, onChange }: { value: string; onChange: (v: string) =
               color: active ? "var(--text-primary)" : "var(--text-tertiary)",
               border: `1px solid ${active ? "rgba(255,255,255,0.15)" : "var(--border)"}`,
             }}
-            onMouseEnter={(e) => {
-              if (!active) (e.currentTarget as HTMLElement).style.color = "var(--text-secondary)";
-            }}
-            onMouseLeave={(e) => {
-              if (!active) (e.currentTarget as HTMLElement).style.color = "var(--text-tertiary)";
-            }}
+            onMouseEnter={(e) => { if (!active) (e.currentTarget as HTMLElement).style.color = "var(--text-secondary)"; }}
+            onMouseLeave={(e) => { if (!active) (e.currentTarget as HTMLElement).style.color = "var(--text-tertiary)"; }}
           >
             {opt.label}
           </button>
@@ -210,6 +296,38 @@ function SkeletonRow() {
 export default function AdminActivity() {
   const { getToken } = useAuth();
   const [filter, setFilter] = useState("");
+  const [preset, setPreset] = useState<Preset>("all");
+  const [range, setRange] = useState<DateRange>({ start: null, end: null });
+
+  function applyPreset(p: Preset) {
+    setPreset(p);
+    setRange(presetToRange(p));
+  }
+
+  function handleCustomDate(field: "start" | "end", value: string) {
+    setPreset("all"); // deselect preset
+    const d = value ? new Date(value) : null;
+    if (d && field === "end") {
+      // end of that day
+      d.setHours(23, 59, 59, 999);
+    }
+    setRange((r) => ({ ...r, [field]: d }));
+  }
+
+  const statsParams = new URLSearchParams();
+  if (range.start) statsParams.set("start", range.start.toISOString());
+  if (range.end)   statsParams.set("end",   range.end.toISOString());
+
+  const { data: stats, isLoading: statsLoading } = useQuery<ActivityStatsResponse>({
+    queryKey: ["admin", "activity-stats", range.start?.toISOString(), range.end?.toISOString()],
+    queryFn: async () => {
+      const token = await getToken();
+      const res = await apiFetch(`/admin/activity/stats?${statsParams}`, { token: token! });
+      if (!res.ok) throw new Error("Failed to fetch stats");
+      return res.json();
+    },
+    staleTime: 60_000,
+  });
 
   const { data, isLoading, isFetchingNextPage, hasNextPage, fetchNextPage, error } =
     useInfiniteQuery<ActivityLogResponse>({
@@ -230,6 +348,17 @@ export default function AdminActivity() {
 
   const allEvents = data?.pages.flatMap((p) => p.events) ?? [];
 
+  const rangeLabel = (() => {
+    if (!range.start && !range.end) return "all time";
+    if (range.start && range.end) {
+      const s = range.start.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+      const e = range.end.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+      return s === e ? s : `${s} – ${e}`;
+    }
+    if (range.start) return `from ${range.start.toLocaleDateString("en-IN", { day: "numeric", month: "short" })}`;
+    return "";
+  })();
+
   return (
     <div className="space-y-5">
       {/* Header */}
@@ -242,7 +371,99 @@ export default function AdminActivity() {
         </p>
       </div>
 
-      {/* Filter */}
+      {/* Date range picker */}
+      <div
+        className="rounded-2xl px-5 py-4 space-y-3"
+        style={{ backgroundColor: "var(--surface)", border: "1px solid var(--border)" }}
+      >
+        {/* Preset pills */}
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {PRESETS.map((p) => {
+            const active = preset === p.value;
+            return (
+              <button
+                key={p.value}
+                onClick={() => applyPreset(p.value)}
+                className="text-[12px] font-medium px-3 py-1.5 rounded-xl transition-ui"
+                style={{
+                  backgroundColor: active ? "rgba(255,255,255,0.10)" : "rgba(255,255,255,0.04)",
+                  color: active ? "var(--text-primary)" : "var(--text-tertiary)",
+                  border: `1px solid ${active ? "rgba(255,255,255,0.15)" : "var(--border)"}`,
+                }}
+                onMouseEnter={(e) => { if (!active) (e.currentTarget as HTMLElement).style.color = "var(--text-secondary)"; }}
+                onMouseLeave={(e) => { if (!active) (e.currentTarget as HTMLElement).style.color = "var(--text-tertiary)"; }}
+              >
+                {p.label}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Custom date inputs */}
+        <div className="flex items-center gap-3 flex-wrap">
+          <div className="flex items-center gap-2">
+            <label className="text-[11px] font-medium uppercase tracking-wide" style={{ color: "var(--text-tertiary)" }}>
+              From
+            </label>
+            <input
+              type="date"
+              value={toInputValue(range.start)}
+              onChange={(e) => handleCustomDate("start", e.target.value)}
+              className="text-[12px] px-2.5 py-1.5 rounded-lg outline-none"
+              style={{
+                backgroundColor: "rgba(255,255,255,0.06)",
+                border: "1px solid var(--border)",
+                color: "var(--text-primary)",
+                colorScheme: "dark",
+              }}
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="text-[11px] font-medium uppercase tracking-wide" style={{ color: "var(--text-tertiary)" }}>
+              To
+            </label>
+            <input
+              type="date"
+              value={toInputValue(range.end)}
+              onChange={(e) => handleCustomDate("end", e.target.value)}
+              className="text-[12px] px-2.5 py-1.5 rounded-lg outline-none"
+              style={{
+                backgroundColor: "rgba(255,255,255,0.06)",
+                border: "1px solid var(--border)",
+                color: "var(--text-primary)",
+                colorScheme: "dark",
+              }}
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Stats strip */}
+      <div className="flex gap-3 flex-wrap">
+        <StatCard
+          label="Hours transcribed"
+          value={stats ? formatHours(stats.hours_transcribed) : "—"}
+          sub={rangeLabel}
+          loading={statsLoading}
+        />
+        <StatCard
+          label="Jobs completed"
+          value={stats ? String(stats.jobs_completed) : "—"}
+          loading={statsLoading}
+        />
+        <StatCard
+          label="Jobs submitted"
+          value={stats ? String(stats.jobs_submitted) : "—"}
+          loading={statsLoading}
+        />
+        <StatCard
+          label="Jobs failed"
+          value={stats ? String(stats.jobs_failed) : "—"}
+          loading={statsLoading}
+        />
+      </div>
+
+      {/* Event filter */}
       <FilterBar value={filter} onChange={(v) => setFilter(v)} />
 
       {/* Feed */}
@@ -257,9 +478,7 @@ export default function AdminActivity() {
             </p>
           </div>
         ) : isLoading ? (
-          <>
-            {Array.from({ length: 12 }).map((_, i) => <SkeletonRow key={i} />)}
-          </>
+          <>{Array.from({ length: 12 }).map((_, i) => <SkeletonRow key={i} />)}</>
         ) : allEvents.length === 0 ? (
           <div className="px-5 py-16 text-center">
             <p className="text-[13px]" style={{ color: "var(--text-tertiary)" }}>
@@ -269,7 +488,6 @@ export default function AdminActivity() {
         ) : (
           <>
             {allEvents.map((e) => <EventRow key={e.id} event={e} />)}
-
             {hasNextPage && (
               <div className="px-5 py-4 flex justify-center">
                 <button

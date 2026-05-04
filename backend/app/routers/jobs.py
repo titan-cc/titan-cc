@@ -30,10 +30,13 @@ def _request_hash(body: JobCreateRequest) -> str:
     ).hexdigest()
 
 
-async def _get_job_or_404(job_id: uuid.UUID, user_id: uuid.UUID, db: AsyncSession) -> Job:
-    result = await db.execute(
-        select(Job).where(Job.id == job_id, Job.user_id == user_id)
-    )
+async def _get_job_or_404(
+    job_id: uuid.UUID, user_id: uuid.UUID, db: AsyncSession, *, is_admin: bool = False
+) -> Job:
+    q = select(Job).where(Job.id == job_id)
+    if not is_admin:
+        q = q.where(Job.user_id == user_id)
+    result = await db.execute(q)
     job = result.scalar_one_or_none()
     if job is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
@@ -127,6 +130,7 @@ async def list_jobs(
     cursor: uuid.UUID | None = None,
     limit: int = 20,
     status: str | None = None,
+    folder_id: str | None = None,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JobListResponse:
@@ -141,6 +145,14 @@ async def list_jobs(
             raise HTTPException(
                 status_code=422, detail=f"Invalid status filter: {status}"
             )
+
+    if folder_id == "unfiled":
+        q = q.where(Job.folder_id.is_(None))
+    elif folder_id is not None:
+        try:
+            q = q.where(Job.folder_id == uuid.UUID(folder_id))
+        except ValueError:
+            raise HTTPException(status_code=422, detail="Invalid folder_id")
 
     if cursor is not None:
         row = (
@@ -175,7 +187,7 @@ async def get_job(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JobResponse:
-    job = await _get_job_or_404(job_id, user.id, db)
+    job = await _get_job_or_404(job_id, user.id, db, is_admin=user.role == "admin")
     return JobResponse.model_validate(job)
 
 
@@ -185,7 +197,7 @@ async def get_transcript(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> TranscriptResponse:
-    job = await _get_job_or_404(job_id, user.id, db)
+    job = await _get_job_or_404(job_id, user.id, db, is_admin=user.role == "admin")
     if job.status != JobStatus.completed:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Job is not completed")
     if not job.output_s3_keys:
@@ -264,6 +276,35 @@ async def update_transcript(
 
     video_url, _ = s3_service.presign_get(job.input_s3_key, expires_in=7200)
     return TranscriptResponse(downloads=downloads, video_url=video_url)
+
+
+@router.patch("/{job_id}/folder", response_model=JobResponse)
+async def move_to_folder(
+    job_id: uuid.UUID,
+    body: dict,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JobResponse:
+    from datetime import UTC, datetime
+    from app.models import Folder
+
+    job = await _get_job_or_404(job_id, user.id, db)
+    folder_id: uuid.UUID | None = body.get("folder_id")
+
+    if folder_id is not None:
+        folder = (
+            await db.execute(
+                select(Folder).where(Folder.id == folder_id, Folder.user_id == user.id)
+            )
+        ).scalar_one_or_none()
+        if folder is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Folder not found")
+
+    job.folder_id = folder_id
+    job.updated_at = datetime.now(UTC)
+    await db.commit()
+    await db.refresh(job)
+    return JobResponse.model_validate(job)
 
 
 @router.post("/{job_id}/retry", response_model=JobResponse)

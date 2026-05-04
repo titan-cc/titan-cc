@@ -63,6 +63,7 @@ class JobResponse(BaseModel):
     input_filename: str | None
     input_duration_seconds: int
     config: dict[str, Any]
+    folder_id: uuid.UUID | None = None
     failure_class: FailureClass | None
     failure_code: str | None
     failure_message: str | None
@@ -248,6 +249,46 @@ class BillingResponse(BaseModel):
     aws: ProviderBilling
 
 
+# ── Folders ────────────────────────────────────────────────────────────────────
+
+class FolderResponse(BaseModel):
+    id: uuid.UUID
+    name: str
+    created_at: datetime
+    job_count: int = 0
+
+    model_config = {"from_attributes": True}
+
+
+class FolderListResponse(BaseModel):
+    folders: list[FolderResponse]
+
+
+class FolderCreateRequest(BaseModel):
+    name: Annotated[str, Field(min_length=1, max_length=100)]
+
+
+class FolderRenameRequest(BaseModel):
+    name: Annotated[str, Field(min_length=1, max_length=100)]
+
+
+# ── Search ─────────────────────────────────────────────────────────────────────
+
+class SearchHit(BaseModel):
+    job_id: uuid.UUID
+    input_filename: str | None
+    folder_id: uuid.UUID | None
+    folder_name: str | None
+    snippet: str
+    created_at: datetime
+    status: JobStatus
+
+
+class SearchResponse(BaseModel):
+    hits: list[SearchHit]
+    query: str
+
+
 # ── Activity log ───────────────────────────────────────────────────────────────
 
 class ActivityLogEntry(BaseModel):
@@ -264,3 +305,10 @@ class ActivityLogEntry(BaseModel):
 class ActivityLogResponse(BaseModel):
     events: list[ActivityLogEntry]
     next_cursor: int | None
+
+
+class ActivityStatsResponse(BaseModel):
+    hours_transcribed: float
+    jobs_completed: int
+    jobs_submitted: int
+    jobs_failed: int

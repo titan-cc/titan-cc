@@ -10,6 +10,7 @@ import TranscriptViewer from "./pages/TranscriptViewer";
 import AdminUsers from "./pages/AdminUsers";
 import AdminBilling from "./pages/AdminBilling";
 import AdminActivity from "./pages/AdminActivity";
+import Search from "./pages/Search";
 
 export default function App() {
   return (
@@ -26,6 +27,7 @@ export default function App() {
             <Route path="/jobs/:id" element={<JobDetail />} />
             <Route path="/jobs/:id/transcript" element={<TranscriptViewer />} />
             <Route path="/failures" element={<Failures />} />
+            <Route path="/search" element={<Search />} />
 
             {/* Admin section — sidebar layout */}
             <Route path="/admin" element={<AdminLayout />}>

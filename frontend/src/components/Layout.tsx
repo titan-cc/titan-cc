@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { NavLink } from "react-router-dom";
+import { NavLink, useNavigate } from "react-router-dom";
 import { UserButton, useAuth } from "@clerk/clerk-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ReactNode } from "react";
@@ -307,6 +307,42 @@ function NotificationBell() {
   );
 }
 
+// ── Search bar ────────────────────────────────────────────────────────────────
+
+function SearchBar({ onSearch }: { onSearch?: () => void }) {
+  const [q, setQ] = useState("");
+  const navigate = useNavigate();
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const trimmed = q.trim();
+    if (!trimmed) return;
+    navigate(`/search?q=${encodeURIComponent(trimmed)}`);
+    onSearch?.();
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="px-3 pb-3">
+      <div
+        className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl"
+        style={{ backgroundColor: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)" }}
+      >
+        <svg className="h-3.5 w-3.5 shrink-0" style={{ color: "rgba(255,255,255,0.3)" }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+            d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+        </svg>
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="Search transcripts…"
+          className="flex-1 bg-transparent text-[12px] outline-none min-w-0"
+          style={{ color: "rgba(255,255,255,0.75)" }}
+        />
+      </div>
+    </form>
+  );
+}
+
 // ── Sidebar content (shared desktop + mobile overlay) ─────────────────────────
 
 function SidebarContent({ me, onClose }: { me?: UserMeResponse; onClose?: () => void }) {
@@ -320,8 +356,13 @@ function SidebarContent({ me, onClose }: { me?: UserMeResponse; onClose?: () => 
         <Brand />
       </div>
 
+      {/* Search */}
+      <div className="pt-3">
+        <SearchBar onSearch={onClose} />
+      </div>
+
       {/* Main nav */}
-      <nav className="flex-1 overflow-y-auto px-3 pt-5 pb-3 flex flex-col gap-0.5">
+      <nav className="flex-1 overflow-y-auto px-3 pt-2 pb-3 flex flex-col gap-0.5">
         <p className="text-[10px] uppercase tracking-widest font-semibold px-2.5 mb-2" style={{ color: "rgba(255,255,255,0.25)" }}>
           Workspace
         </p>

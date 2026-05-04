@@ -1,9 +1,14 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "@clerk/clerk-react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/api/client";
-import type { AdminJobListResponse, JobListResponse, UserMeResponse } from "@/api/types";
+import type {
+  AdminJobListResponse,
+  FolderListResponse,
+  JobListResponse,
+  UserMeResponse,
+} from "@/api/types";
 import StatusBadge from "@/components/StatusBadge";
 import ProgressBar from "@/components/ProgressBar";
 import { isTerminal } from "@/lib/poll";
@@ -116,7 +121,7 @@ function JobRow({ job, showUser }: JobRowProps) {
   );
 }
 
-function EmptyState() {
+function EmptyState({ folderId }: { folderId: string | null }) {
   return (
     <div className="flex flex-col items-center justify-center py-24 text-center">
       <div className="p-4 rounded-2xl mb-4" style={{ backgroundColor: "var(--surface-subtle)" }}>
@@ -125,25 +130,247 @@ function EmptyState() {
             d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
         </svg>
       </div>
-      <p className="text-sm font-medium" style={{ color: "var(--text-secondary)" }}>No transcriptions yet</p>
-      <p className="text-xs mt-1 mb-5" style={{ color: "var(--text-tertiary)" }}>Upload a file to create your first job</p>
-      <Link
-        to="/upload"
-        className="btn-primary text-sm font-semibold px-4 py-2 rounded-xl text-white active:scale-[0.98]"
-      >
-        Upload a file
-      </Link>
+      {folderId === "unfiled" ? (
+        <p className="text-sm font-medium" style={{ color: "var(--text-secondary)" }}>No unfiled transcriptions</p>
+      ) : folderId ? (
+        <p className="text-sm font-medium" style={{ color: "var(--text-secondary)" }}>This folder is empty</p>
+      ) : (
+        <>
+          <p className="text-sm font-medium" style={{ color: "var(--text-secondary)" }}>No transcriptions yet</p>
+          <p className="text-xs mt-1 mb-5" style={{ color: "var(--text-tertiary)" }}>Upload a file to create your first job</p>
+          <Link
+            to="/upload"
+            className="btn-primary text-sm font-semibold px-4 py-2 rounded-xl text-white active:scale-[0.98]"
+          >
+            Upload a file
+          </Link>
+        </>
+      )}
     </div>
   );
 }
 
-function MyJobs() {
+// ── Folder bar ────────────────────────────────────────────────────────────────
+
+type FolderFilter = "all" | "unfiled" | string; // string = folder UUID
+
+function FolderBar({
+  selected,
+  onSelect,
+  isAdmin,
+}: {
+  selected: FolderFilter;
+  onSelect: (f: FolderFilter) => void;
+  isAdmin: boolean;
+}) {
   const { getToken } = useAuth();
-  const { data, isLoading, error } = useQuery<JobListResponse>({
-    queryKey: ["jobs"],
+  const qc = useQueryClient();
+  const [creating, setCreating] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
+
+  const { data } = useQuery<FolderListResponse>({
+    queryKey: ["folders"],
     queryFn: async () => {
       const token = await getToken();
-      const res = await apiFetch("/jobs?limit=50", { token: token! });
+      const res = await apiFetch("/folders", { token: token! });
+      return res.json();
+    },
+    staleTime: 30_000,
+  });
+
+  const folders = data?.folders ?? [];
+
+  const { mutate: createFolder, isPending: isCreating } = useMutation({
+    mutationFn: async (name: string) => {
+      const token = await getToken();
+      const res = await apiFetch("/folders", {
+        method: "POST",
+        token: token!,
+        body: JSON.stringify({ name }),
+      });
+      if (!res.ok) throw new Error("Failed to create folder");
+      return res.json();
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["folders"] });
+      setCreating(false);
+      setNewName("");
+    },
+  });
+
+  const { mutate: renameFolder } = useMutation({
+    mutationFn: async ({ id, name }: { id: string; name: string }) => {
+      const token = await getToken();
+      await apiFetch(`/folders/${id}`, {
+        method: "PATCH",
+        token: token!,
+        body: JSON.stringify({ name }),
+      });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["folders"] });
+      setEditingId(null);
+    },
+  });
+
+  const { mutate: deleteFolder } = useMutation({
+    mutationFn: async (id: string) => {
+      const token = await getToken();
+      await apiFetch(`/folders/${id}`, { method: "DELETE", token: token! });
+    },
+    onSuccess: (_, id) => {
+      qc.invalidateQueries({ queryKey: ["folders"] });
+      qc.invalidateQueries({ queryKey: ["jobs"] });
+      if (selected === id) onSelect("all");
+    },
+  });
+
+  const chipStyle = (active: boolean) => ({
+    backgroundColor: active ? "var(--brand)" : "var(--surface)",
+    color: active ? "#fff" : "var(--text-secondary)",
+    border: `1px solid ${active ? "transparent" : "var(--border)"}`,
+  });
+
+  return (
+    <div className="mb-5">
+      <div className="flex items-center gap-2 flex-wrap">
+        {/* Static chips */}
+        {(["all", "unfiled"] as const).map((f) => (
+          <button
+            key={f}
+            onClick={() => onSelect(f)}
+            className="px-3 py-1 rounded-full text-xs font-medium transition-ui shrink-0"
+            style={chipStyle(selected === f)}
+          >
+            {f === "all" ? "All" : "Unfiled"}
+          </button>
+        ))}
+
+        {/* Folder chips */}
+        {folders.map((folder) => (
+          <div key={folder.id} className="relative group/chip shrink-0">
+            {editingId === folder.id ? (
+              <form
+                className="flex items-center gap-1"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (editName.trim()) renameFolder({ id: folder.id, name: editName.trim() });
+                }}
+              >
+                <input
+                  autoFocus
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  onBlur={() => setEditingId(null)}
+                  className="px-2 py-0.5 rounded-full text-xs border outline-none w-28"
+                  style={{ borderColor: "var(--brand)", color: "var(--text-primary)" }}
+                />
+              </form>
+            ) : (
+              <button
+                onClick={() => onSelect(folder.id)}
+                onDoubleClick={() => {
+                  setEditingId(folder.id);
+                  setEditName(folder.name);
+                }}
+                className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-ui"
+                style={chipStyle(selected === folder.id)}
+                title="Double-click to rename"
+              >
+                <FolderIcon size={11} />
+                {folder.name}
+                <span className="opacity-60 text-[10px]">{folder.job_count}</span>
+              </button>
+            )}
+
+            {/* Admin delete */}
+            {isAdmin && editingId !== folder.id && (
+              <button
+                className="absolute -top-1.5 -right-1.5 hidden group-hover/chip:flex h-4 w-4 items-center justify-center rounded-full text-white text-[10px] font-bold"
+                style={{ backgroundColor: "var(--destructive, #e53e3e)" }}
+                title="Delete folder (admin)"
+                onClick={() => {
+                  if (confirm(`Delete folder "${folder.name}" and all its transcripts?`)) {
+                    deleteFolder(folder.id);
+                  }
+                }}
+              >
+                ×
+              </button>
+            )}
+          </div>
+        ))}
+
+        {/* Create folder */}
+        {creating ? (
+          <form
+            className="flex items-center gap-1"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (newName.trim()) createFolder(newName.trim());
+            }}
+          >
+            <input
+              autoFocus
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              onBlur={() => { if (!isCreating) { setCreating(false); setNewName(""); } }}
+              placeholder="Folder name"
+              className="px-2 py-0.5 rounded-full text-xs border outline-none w-28"
+              style={{ borderColor: "var(--brand)", color: "var(--text-primary)" }}
+            />
+            <button
+              type="submit"
+              disabled={isCreating || !newName.trim()}
+              className="px-2 py-0.5 rounded-full text-xs text-white"
+              style={{ backgroundColor: "var(--brand)", opacity: isCreating ? 0.6 : 1 }}
+            >
+              {isCreating ? "…" : "Add"}
+            </button>
+          </form>
+        ) : (
+          <button
+            onClick={() => setCreating(true)}
+            className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium transition-ui border border-dashed"
+            style={{ color: "var(--text-tertiary)", borderColor: "var(--border)" }}
+            title="New folder"
+          >
+            <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
+            </svg>
+            New folder
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function FolderIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+        d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
+    </svg>
+  );
+}
+
+// ── My Jobs (with folder filter) ──────────────────────────────────────────────
+
+function MyJobs({ folderFilter }: { folderFilter: FolderFilter }) {
+  const { getToken } = useAuth();
+
+  const queryKey = ["jobs", folderFilter];
+  const { data, isLoading, error } = useQuery<JobListResponse>({
+    queryKey,
+    queryFn: async () => {
+      const token = await getToken();
+      const params = new URLSearchParams({ limit: "50" });
+      if (folderFilter === "unfiled") params.set("folder_id", "unfiled");
+      else if (folderFilter !== "all") params.set("folder_id", folderFilter);
+      const res = await apiFetch(`/jobs?${params}`, { token: token! });
       return res.json();
     },
     refetchInterval: (query) => {
@@ -162,7 +389,7 @@ function MyJobs() {
     );
   }
 
-  if (!isLoading && jobs.length === 0) return <EmptyState />;
+  if (!isLoading && jobs.length === 0) return <EmptyState folderId={folderFilter === "all" ? null : folderFilter} />;
 
   return (
     <div
@@ -226,6 +453,7 @@ type Tab = "my" | "all";
 export default function Jobs() {
   const { getToken } = useAuth();
   const [tab, setTab] = useState<Tab>("my");
+  const [folderFilter, setFolderFilter] = useState<FolderFilter>("all");
 
   const { data: me } = useQuery<UserMeResponse>({
     queryKey: ["me"],
@@ -254,6 +482,7 @@ export default function Jobs() {
         </Link>
       </div>
 
+      {/* Admin tab switcher */}
       {isAdmin && (
         <div className="flex gap-1 mb-5 p-1 rounded-xl w-fit" style={{ backgroundColor: "var(--surface)", border: "1px solid var(--border)" }}>
           {(["my", "all"] as Tab[]).map((t) => (
@@ -273,7 +502,16 @@ export default function Jobs() {
         </div>
       )}
 
-      {tab === "my" ? <MyJobs /> : <AllJobs />}
+      {/* Folder filter — only show on My Jobs tab */}
+      {tab === "my" && (
+        <FolderBar
+          selected={folderFilter}
+          onSelect={setFolderFilter}
+          isAdmin={!!isAdmin}
+        />
+      )}
+
+      {tab === "my" ? <MyJobs folderFilter={folderFilter} /> : <AllJobs />}
     </div>
   );
 }
