@@ -145,9 +145,11 @@ async def update_folder(
 @router.delete("/{folder_id}", status_code=204)
 async def delete_folder(
     folder_id: uuid.UUID,
-    _admin: User = Depends(require_admin),
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> None:
     folder = await _get_folder_or_404(folder_id, db)
+    if not _can_modify(folder, user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorised to delete this folder")
     await db.execute(delete(Folder).where(Folder.id == folder.id))
     await db.commit()
