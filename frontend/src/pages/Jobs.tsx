@@ -1201,8 +1201,12 @@ function DriveTable({
   const jobs = tab === "my" ? (myJobsData?.jobs ?? []) : (adminJobsData?.jobs ?? []);
 
   // Show folder rows only in the root "all" view, not inside a specific folder
-  const showFolderRows = folderFilter === "all" && tab === "my";
-  const visibleFolders = showFolderRows ? folders : [];
+  // "My Files": personal folders only — org/shared folders belong in "All Files"
+  // "All Files" (admin): all folders, both personal and org-scoped
+  const showFolderRows = folderFilter === "all";
+  const visibleFolders = showFolderRows
+    ? (tab === "my" ? folders.filter((f) => f.scope === "personal") : folders)
+    : [];
 
   const totalItems = visibleFolders.length + jobs.length;
   const allChecked = totalItems > 0 && [...visibleFolders.map((f) => f.id), ...jobs.map((j) => j.id)]
