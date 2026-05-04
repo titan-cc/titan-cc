@@ -644,9 +644,10 @@ interface JobRowProps {
   onDragStart: (id: string) => void;
   onDragEnd: () => void;
   showUser?: boolean;
+  onContextMenu?: (e: React.MouseEvent, jobId: string, currentFolderId: string | null) => void;
 }
 
-function JobTableRow({ job, selected, onSelect, isDragging, onDragStart, onDragEnd, showUser }: JobRowProps) {
+function JobTableRow({ job, selected, onSelect, isDragging, onDragStart, onDragEnd, showUser, onContextMenu }: JobRowProps) {
   const [hovered, setHovered] = useState(false);
   const isActive = ["queued", "dispatched", "processing"].includes(job.status);
   const to = job.status === "completed" ? `/jobs/${job.id}/transcript` : `/jobs/${job.id}`;
@@ -662,6 +663,10 @@ function JobTableRow({ job, selected, onSelect, isDragging, onDragStart, onDragE
       onDragEnd={onDragEnd}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        onContextMenu?.(e, job.id, job.folder_id ?? null);
+      }}
       className="px-2 transition-colors duration-100"
       style={{
         ...TABLE_GRID,
@@ -954,6 +959,151 @@ function Toolbar({
   );
 }
 
+// ── Context Menu ─────────────────────────────────────────────────────────────
+
+interface ContextMenuState {
+  x: number;
+  y: number;
+  jobId: string;
+  currentFolderId: string | null;
+}
+
+function ContextMenu({
+  state,
+  folders,
+  onMove,
+  onClose,
+}: {
+  state: ContextMenuState;
+  folders: Folder[];
+  onMove: (jobId: string, folderId: string | null) => void;
+  onClose: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleDown(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    }
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    document.addEventListener("mousedown", handleDown);
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("mousedown", handleDown);
+      document.removeEventListener("keydown", handleKey);
+    };
+  }, [onClose]);
+
+  // Nudge into viewport
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const menuW = 220;
+  const menuH = Math.min(48 + folders.length * 36 + (state.currentFolderId ? 44 : 0), 400);
+  const x = state.x + menuW > vw ? state.x - menuW : state.x;
+  const y = state.y + menuH > vh ? state.y - menuH : state.y;
+
+  return (
+    <div
+      ref={ref}
+      className="fixed z-50 py-1 rounded-xl overflow-hidden"
+      style={{
+        left: x,
+        top: y,
+        width: menuW,
+        backgroundColor: "var(--surface)",
+        border: "1px solid var(--border)",
+        boxShadow: "0 8px 32px rgba(0,0,0,0.14), 0 2px 8px rgba(0,0,0,0.08)",
+      }}
+    >
+      {/* Header */}
+      <div
+        className="px-3 py-2 text-[10px] font-bold uppercase tracking-widest"
+        style={{ color: "#B1B3B6", borderBottom: "1px solid var(--border)" }}
+      >
+        Move to folder
+      </div>
+
+      {/* Folder options */}
+      <div className="py-1 max-h-60 overflow-y-auto">
+        {folders.map((f) => {
+          const isCurrent = f.id === state.currentFolderId;
+          return (
+            <button
+              key={f.id}
+              onClick={() => { onMove(state.jobId, f.id); onClose(); }}
+              disabled={isCurrent}
+              className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-left transition-colors duration-100"
+              style={{
+                color: isCurrent ? "#B1B3B6" : "var(--text-primary)",
+                cursor: isCurrent ? "default" : "pointer",
+                backgroundColor: "transparent",
+                border: "none",
+                fontFamily: "inherit",
+              }}
+              onMouseEnter={(e) => {
+                if (!isCurrent) (e.currentTarget as HTMLElement).style.backgroundColor = "rgba(0,174,239,0.06)";
+              }}
+              onMouseLeave={(e) => {
+                (e.currentTarget as HTMLElement).style.backgroundColor = "transparent";
+              }}
+            >
+              <span style={{ color: isCurrent ? "#B1B3B6" : "#1A1A1A", flexShrink: 0 }}>
+                <FolderFilledIcon />
+              </span>
+              <span className="truncate font-medium">{f.name}</span>
+              {isCurrent && (
+                <span className="ml-auto shrink-0 text-[10px] font-semibold" style={{ color: "#00AEEF" }}>
+                  current
+                </span>
+              )}
+            </button>
+          );
+        })}
+
+        {folders.length === 0 && (
+          <div className="px-3 py-3 text-xs italic" style={{ color: "#B1B3B6" }}>
+            No folders yet
+          </div>
+        )}
+      </div>
+
+      {/* Remove from folder — only when currently in one */}
+      {state.currentFolderId && (
+        <>
+          <div style={{ borderTop: "1px solid var(--border)" }} />
+          <button
+            onClick={() => { onMove(state.jobId, null); onClose(); }}
+            className="w-full flex items-center gap-2.5 px-3 py-2.5 text-sm text-left transition-colors duration-100"
+            style={{
+              color: "var(--text-secondary)",
+              cursor: "pointer",
+              backgroundColor: "transparent",
+              border: "none",
+              fontFamily: "inherit",
+            }}
+            onMouseEnter={(e) => {
+              (e.currentTarget as HTMLElement).style.backgroundColor = "rgba(236,0,140,0.05)";
+              (e.currentTarget as HTMLElement).style.color = "#EC008C";
+            }}
+            onMouseLeave={(e) => {
+              (e.currentTarget as HTMLElement).style.backgroundColor = "transparent";
+              (e.currentTarget as HTMLElement).style.color = "var(--text-secondary)";
+            }}
+          >
+            <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8} style={{ flexShrink: 0 }}>
+              <path strokeLinecap="round" strokeLinejoin="round"
+                d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z M9 12l6 0M12 9l0 6" />
+            </svg>
+            <span className="font-medium">Remove from folder</span>
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ── Toast ──────────────────────────────────────────────────────────────────────
 
 function Toast({ message, type, onDismiss }: { message: string; type: "success" | "info"; onDismiss: () => void }) {
@@ -1006,12 +1156,13 @@ interface DriveTableProps {
   renamingFolderId: string | null;
   onStartRename: (id: string) => void;
   onCancelRename: () => void;
+  onJobContextMenu: (e: React.MouseEvent, jobId: string, currentFolderId: string | null) => void;
 }
 
 function DriveTable({
   tab, folderFilter, folders, selectedIds, onSelect, onToggleAll,
   onNavigateFolder, onDropJob, isAdmin, onDeleteFolder, onRenameFolder, onScopeChange,
-  renamingFolderId, onStartRename, onCancelRename,
+  renamingFolderId, onStartRename, onCancelRename, onJobContextMenu,
 }: DriveTableProps) {
   const { getToken } = useAuth();
   const [draggingId, setDraggingId] = useState<string | null>(null);
@@ -1134,6 +1285,7 @@ function DriveTable({
             onDragStart={(id) => setDraggingId(id)}
             onDragEnd={() => setDraggingId(null)}
             showUser={tab === "all"}
+            onContextMenu={onJobContextMenu}
           />
         ))
       )}
@@ -1155,6 +1307,7 @@ export default function Jobs() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [toast, setToast] = useState<{ message: string; type: "success" | "info" } | null>(null);
   const [searchVal, setSearchVal] = useState("");
 
@@ -1399,8 +1552,22 @@ export default function Jobs() {
           renamingFolderId={renamingFolderId}
           onStartRename={(id) => setRenamingFolderId(id)}
           onCancelRename={() => setRenamingFolderId(null)}
+          onJobContextMenu={(e, jobId, currentFolderId) => {
+            e.preventDefault();
+            setContextMenu({ x: e.clientX, y: e.clientY, jobId, currentFolderId });
+          }}
         />
       </div>
+
+      {/* Right-click context menu */}
+      {contextMenu && (
+        <ContextMenu
+          state={contextMenu}
+          folders={folders}
+          onMove={handleDropJob}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
 
       {/* Create Folder Modal */}
       {showCreateModal && (
