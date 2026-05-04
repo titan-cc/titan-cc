@@ -594,6 +594,7 @@ function FolderPanel({
               />
               <button
                 type="submit"
+                onMouseDown={(e) => e.preventDefault()}
                 disabled={isCreating || !newName.trim()}
                 className="text-xs font-semibold px-2 py-0.5 rounded-lg text-white shrink-0"
                 style={{ backgroundColor: "#00AEEF", opacity: isCreating ? 0.6 : 1 }}
