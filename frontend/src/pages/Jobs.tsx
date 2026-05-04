@@ -126,7 +126,7 @@ function JobRow({ job, showUser, isDragging }: JobRowProps) {
 
   return (
     <Link
-      to={`/jobs/${job.id}`}
+      to={job.status === "completed" ? `/jobs/${job.id}/transcript` : `/jobs/${job.id}`}
       draggable={false}
       className="flex flex-col px-5 py-4 transition-all duration-150 select-none"
       style={{
