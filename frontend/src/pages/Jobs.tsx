@@ -1459,6 +1459,7 @@ export default function Jobs() {
       setSelectedIds((prev) => { const s = new Set(prev); s.delete(id); return s; });
       setToast({ message: "Folder deleted", type: "success" });
     },
+    onError: (e) => setToast({ message: e instanceof Error ? e.message : "Failed to delete folder", type: "error" }),
   });
 
   const { mutate: deleteJob } = useMutation({
