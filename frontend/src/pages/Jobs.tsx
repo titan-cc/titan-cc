@@ -1216,25 +1216,28 @@ function ContextMenu({
 
 // ── Toast ──────────────────────────────────────────────────────────────────────
 
-function Toast({ message, type, onDismiss }: { message: string; type: "success" | "info"; onDismiss: () => void }) {
+function Toast({ message, type, onDismiss }: { message: string; type: "success" | "info" | "error"; onDismiss: () => void }) {
   useEffect(() => {
-    const t = setTimeout(onDismiss, 3000);
+    const t = setTimeout(onDismiss, 4000);
     return () => clearTimeout(t);
   }, [onDismiss]);
+
+  const bg = type === "success" ? "#00AEEF" : type === "error" ? "#EC008C" : "var(--surface)";
+  const color = type === "info" ? "var(--text-primary)" : "#fff";
+  const border = type === "info" ? "1px solid var(--border)" : "none";
 
   return (
     <div
       className="fixed bottom-6 right-6 z-50 flex items-center gap-2.5 px-4 py-3 rounded-2xl"
-      style={{
-        backgroundColor: type === "success" ? "#00AEEF" : "var(--surface)",
-        border: type === "info" ? "1px solid var(--border)" : "none",
-        color: type === "success" ? "#fff" : "var(--text-primary)",
-        boxShadow: "0 8px 28px rgba(0,0,0,0.18)",
-      }}
+      style={{ backgroundColor: bg, border, color, boxShadow: "0 8px 28px rgba(0,0,0,0.18)" }}
     >
       {type === "success" ? (
         <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+        </svg>
+      ) : type === "error" ? (
+        <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
         </svg>
       ) : (
         <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -1460,7 +1463,7 @@ export default function Jobs() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
-  const [toast, setToast] = useState<{ message: string; type: "success" | "info" } | null>(null);
+  const [toast, setToast] = useState<{ message: string; type: "success" | "info" | "error" } | null>(null);
   const [searchVal, setSearchVal] = useState("");
 
   const { data: me } = useQuery<UserMeResponse>({
