@@ -359,21 +359,45 @@ const TABLE_GRID: React.CSSProperties = {
 
 // ── Table header ─────────────────────────────────────────────────────────────
 
+type SortField = "name" | "size" | "created";
+type SortDir = "asc" | "desc";
+
+function SortIndicator({ active, dir }: { field: SortField; active: boolean; dir: SortDir }) {
+  return (
+    <svg
+      width="11" height="11" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}
+      style={{ color: active ? "#00AEEF" : "#D0D2D5", flexShrink: 0, transition: "color 0.1s" }}
+    >
+      {dir === "asc" && active
+        ? <path strokeLinecap="round" strokeLinejoin="round" d="M3 4.5h14.25M3 9h9.75M3 13.5h5.25m5.25-.75L17.25 9m0 0L21 12.75M17.25 9v12" />
+        : dir === "desc" && active
+        ? <path strokeLinecap="round" strokeLinejoin="round" d="M3 4.5h14.25M3 9h9.75M3 13.5h5.25m5.25.75L17.25 15m0 0L21 11.25M17.25 15V3" />
+        : <path strokeLinecap="round" strokeLinejoin="round" d="M3 7.5L7.5 3m0 0L12 7.5M7.5 3v13.5m13.5 0L16.5 21m0 0L12 16.5m4.5 4.5V7.5" />}
+    </svg>
+  );
+}
+
 function TableHeader({
   allChecked,
   someChecked,
   onToggleAll,
+  sortField,
+  sortDir,
+  onSort,
 }: {
   allChecked: boolean;
   someChecked: boolean;
   onToggleAll: (v: boolean) => void;
+  sortField: SortField;
+  sortDir: SortDir;
+  onSort: (f: SortField) => void;
 }) {
-  const cols = [
-    { label: "Name", cls: "col-span-1" },
+  const cols: { label: string; sort?: SortField }[] = [
+    { label: "Name", sort: "name" },
     { label: "Status" },
-    { label: "Duration" },
-    { label: "Created" },
-    { label: "Edited", icon: true },
+    { label: "Duration", sort: "size" },
+    { label: "Created", sort: "created" },
+    { label: "Edited" },
   ];
 
   return (
@@ -406,17 +430,20 @@ function TableHeader({
 
       {/* Column labels */}
       {cols.map((c) => (
-        <div key={c.label} className="flex items-center gap-1 pr-2">
+        <div
+          key={c.label}
+          className="flex items-center gap-1 pr-2"
+          style={{ cursor: c.sort ? "pointer" : "default" }}
+          onClick={() => c.sort && onSort(c.sort)}
+        >
           <span
-            className="text-[11px] font-semibold uppercase tracking-wide select-none truncate"
-            style={{ color: "#777878" }}
+            className="text-[11px] font-semibold uppercase tracking-wide select-none truncate transition-colors"
+            style={{ color: c.sort && sortField === c.sort ? "#00AEEF" : "#777878" }}
           >
             {c.label}
           </span>
-          {c.icon && (
-            <svg width="11" height="11" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5} style={{ color: "#B1B3B6", flexShrink: 0 }}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M3 7.5L7.5 3m0 0L12 7.5M7.5 3v13.5m13.5 0L16.5 21m0 0L12 16.5m4.5 4.5V7.5" />
-            </svg>
+          {c.sort && (
+            <SortIndicator field={c.sort} active={sortField === c.sort} dir={sortDir} />
           )}
         </div>
       ))}
@@ -1272,12 +1299,37 @@ interface DriveTableProps {
   onStartRename: (id: string) => void;
   onCancelRename: () => void;
   onJobContextMenu: (e: React.MouseEvent, jobId: string, currentFolderId: string | null) => void;
+  sortField: SortField;
+  sortDir: SortDir;
+  onSort: (f: SortField) => void;
+}
+
+function sortFolders(folders: Folder[], field: SortField, dir: SortDir): Folder[] {
+  return [...folders].sort((a, b) => {
+    let cmp = 0;
+    if (field === "name") cmp = a.name.localeCompare(b.name);
+    else if (field === "size") cmp = a.job_count - b.job_count;
+    else cmp = new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+    return dir === "asc" ? cmp : -cmp;
+  });
+}
+
+function sortJobs<T extends { input_filename: string | null; input_duration_seconds: number; created_at: string }>(
+  jobs: T[], field: SortField, dir: SortDir,
+): T[] {
+  return [...jobs].sort((a, b) => {
+    let cmp = 0;
+    if (field === "name") cmp = (a.input_filename ?? "").localeCompare(b.input_filename ?? "");
+    else if (field === "size") cmp = a.input_duration_seconds - b.input_duration_seconds;
+    else cmp = new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+    return dir === "asc" ? cmp : -cmp;
+  });
 }
 
 function DriveTable({
   tab, folderFilter, folders, selectedIds, onSelect, onToggleAll,
   onNavigateFolder, onDropJob, isAdmin, onDeleteFolder, onDeleteJob, onQcToggle, onRenameFolder, onScopeChange,
-  renamingFolderId, onStartRename, onCancelRename, onJobContextMenu,
+  renamingFolderId, onStartRename, onCancelRename, onJobContextMenu, sortField, sortDir, onSort,
 }: DriveTableProps) {
   const { getToken } = useAuth();
   const [draggingId, setDraggingId] = useState<string | null>(null);
@@ -1321,9 +1373,10 @@ function DriveTable({
   // Split into personal (owned by user) and team (org-scoped, shared with everyone).
   // Both sections appear in "My Files" so non-admin users can still access team folders.
   const showFolderRows = folderFilter === "all";
-  const personalFolders = showFolderRows ? folders.filter((f) => f.scope === "personal") : [];
-  const teamFolders = showFolderRows ? folders.filter((f) => f.scope === "org") : [];
+  const personalFolders = showFolderRows ? sortFolders(folders.filter((f) => f.scope === "personal"), sortField, sortDir) : [];
+  const teamFolders = showFolderRows ? sortFolders(folders.filter((f) => f.scope === "org"), sortField, sortDir) : [];
   const visibleFolders = [...personalFolders, ...teamFolders];
+  const sortedJobs = sortJobs(jobs, sortField, sortDir);
 
   const totalItems = visibleFolders.length + jobs.length;
   const allChecked = totalItems > 0 && [...visibleFolders.map((f) => f.id), ...jobs.map((j) => j.id)]
@@ -1356,6 +1409,9 @@ function DriveTable({
         allChecked={allChecked}
         someChecked={someChecked}
         onToggleAll={handleToggleAll}
+        sortField={sortField}
+        sortDir={sortDir}
+        onSort={onSort}
       />
 
       {/* Personal folder rows */}
@@ -1428,7 +1484,7 @@ function DriveTable({
       ) : jobs.length === 0 && visibleFolders.length === 0 ? (
         <EmptyState inFolder={folderFilter !== "all"} />
       ) : (
-        jobs.map((job) => (
+        sortedJobs.map((job) => (
           <JobTableRow
             key={job.id}
             job={job}
@@ -1465,6 +1521,13 @@ export default function Jobs() {
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [toast, setToast] = useState<{ message: string; type: "success" | "info" | "error" } | null>(null);
   const [searchVal, setSearchVal] = useState("");
+  const [sortField, setSortField] = useState<SortField>("created");
+  const [sortDir, setSortDir] = useState<SortDir>("desc");
+
+  function handleSort(field: SortField) {
+    if (sortField === field) setSortDir((d) => d === "asc" ? "desc" : "asc");
+    else { setSortField(field); setSortDir("asc"); }
+  }
 
   const { data: me } = useQuery<UserMeResponse>({
     queryKey: ["me"],
@@ -1740,6 +1803,9 @@ export default function Jobs() {
           onDeleteFolder={(id) => deleteFolder(id)}
           onDeleteJob={(id) => deleteJob(id)}
           onQcToggle={(id, isDone) => toggleQc({ id, isDone })}
+          sortField={sortField}
+          sortDir={sortDir}
+          onSort={handleSort}
           onRenameFolder={(id, name) => { updateFolder({ id, name }); setRenamingFolderId(null); }}
           onScopeChange={(id, scope) => updateFolder({ id, scope })}
           renamingFolderId={renamingFolderId}
