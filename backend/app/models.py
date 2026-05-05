@@ -148,6 +148,8 @@ class Job(Base):
     dispatched_at: Mapped[datetime | None] = mapped_column(TIMESTAMPTZ, nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(TIMESTAMPTZ, nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(TIMESTAMPTZ, nullable=True)
+    qc_done_at: Mapped[datetime | None] = mapped_column(TIMESTAMPTZ, nullable=True)
+    qc_done_by_email: Mapped[str | None] = mapped_column(Text, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
         TIMESTAMPTZ,
         nullable=False,

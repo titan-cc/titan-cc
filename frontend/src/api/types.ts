@@ -36,6 +36,8 @@ export interface Job {
   started_at: string | null;
   completed_at: string | null;
   expires_at: string;
+  qc_done_at: string | null;
+  qc_done_by_email: string | null;
 }
 
 // ── Folders ───────────────────────────────────────────────────────────────────

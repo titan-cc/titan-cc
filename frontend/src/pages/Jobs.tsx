@@ -138,6 +138,57 @@ function CheckAllIcon() {
   );
 }
 
+function QcCheckIcon({ filled }: { filled?: boolean }) {
+  return filled ? (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+      <circle cx="12" cy="12" r="10" fill="#22c55e" />
+      <path d="M7 12.5l3.5 3.5 6.5-7" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  ) : (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M7 12.5l3.5 3.5 6.5-7" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function QcButton({
+  isDone, doneByEmail, doneAt, rowHovered, onToggle,
+}: {
+  isDone: boolean; doneByEmail: string | null; doneAt: string | null;
+  rowHovered: boolean; onToggle: () => void;
+}) {
+  const [tip, setTip] = useState(false);
+  if (!isDone && !rowHovered) return null;
+  return (
+    <div
+      className="relative shrink-0"
+      onMouseEnter={() => setTip(true)}
+      onMouseLeave={() => setTip(false)}
+    >
+      <button
+        onClick={(e) => { e.stopPropagation(); e.preventDefault(); onToggle(); }}
+        className="p-1.5 rounded-lg transition-colors"
+        style={{ color: isDone ? "#22c55e" : "#B1B3B6" }}
+        onMouseEnter={(e) => { if (!isDone) (e.currentTarget as HTMLElement).style.color = "#22c55e"; }}
+        onMouseLeave={(e) => { if (!isDone) (e.currentTarget as HTMLElement).style.color = "#B1B3B6"; }}
+      >
+        <QcCheckIcon filled={isDone} />
+      </button>
+      {tip && (
+        <div
+          className="absolute bottom-full right-0 mb-1.5 z-50 whitespace-nowrap rounded-lg px-2.5 py-1.5 text-[11px] font-medium pointer-events-none"
+          style={{ backgroundColor: "#1A1A1A", color: "#fff", boxShadow: "0 4px 12px rgba(0,0,0,0.3)" }}
+        >
+          {isDone && doneByEmail
+            ? <><span style={{ color: "#22c55e" }}>✓ QC done</span> by {doneByEmail}{doneAt ? ` · ${timeAgo(doneAt)}` : ""}</>
+            : "Mark as QC done"}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Create Folder Modal ──────────────────────────────────────────────────────
 
 function CreateFolderModal({
@@ -637,6 +688,8 @@ interface JobRowProps {
     created_at: string;
     user_email?: string;
     folder_id?: string | null;
+    qc_done_at?: string | null;
+    qc_done_by_email?: string | null;
   };
   selected: boolean;
   onSelect: (id: string, v: boolean) => void;
@@ -646,9 +699,10 @@ interface JobRowProps {
   showUser?: boolean;
   onContextMenu?: (e: React.MouseEvent, jobId: string, currentFolderId: string | null) => void;
   onDelete?: (id: string) => void;
+  onQcToggle?: (id: string, isDone: boolean) => void;
 }
 
-function JobTableRow({ job, selected, onSelect, isDragging, onDragStart, onDragEnd, showUser, onContextMenu, onDelete }: JobRowProps) {
+function JobTableRow({ job, selected, onSelect, isDragging, onDragStart, onDragEnd, showUser, onContextMenu, onDelete, onQcToggle }: JobRowProps) {
   const [hovered, setHovered] = useState(false);
   const isActive = ["queued", "dispatched", "processing"].includes(job.status);
   const to = job.status === "completed" ? `/jobs/${job.id}/transcript` : `/jobs/${job.id}`;
@@ -764,27 +818,38 @@ function JobTableRow({ job, selected, onSelect, isDragging, onDragStart, onDragE
         </span>
       </div>
 
-      {/* Edited (time-ago) + hover delete */}
+      {/* Edited (time-ago) + hover actions */}
       <div className="hidden md:flex items-center justify-between pr-2 gap-1">
         <span className="text-[12px] tabular-nums" style={{ color: "#777878" }}>
           {timeAgo(job.created_at)}
         </span>
-        {hovered && onDelete && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              e.preventDefault();
-              if (window.confirm("Delete this transcript? This cannot be undone.")) onDelete(job.id);
-            }}
-            className="p-1.5 rounded-lg transition-colors shrink-0"
-            title="Delete transcript"
-            style={{ color: "#B1B3B6" }}
-            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "#EC008C"; }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "#B1B3B6"; }}
-          >
-            <TrashIcon />
-          </button>
-        )}
+        <div className="flex items-center gap-0.5">
+          {onQcToggle && (
+            <QcButton
+              isDone={!!job.qc_done_at}
+              doneByEmail={job.qc_done_by_email ?? null}
+              doneAt={job.qc_done_at ?? null}
+              rowHovered={hovered}
+              onToggle={() => onQcToggle(job.id, !!job.qc_done_at)}
+            />
+          )}
+          {hovered && onDelete && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                if (window.confirm("Delete this transcript? This cannot be undone.")) onDelete(job.id);
+              }}
+              className="p-1.5 rounded-lg transition-colors shrink-0"
+              title="Delete transcript"
+              style={{ color: "#B1B3B6" }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "#EC008C"; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "#B1B3B6"; }}
+            >
+              <TrashIcon />
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -1197,6 +1262,7 @@ interface DriveTableProps {
   isAdmin: boolean;
   onDeleteFolder: (id: string) => void;
   onDeleteJob: (id: string) => void;
+  onQcToggle: (id: string, isDone: boolean) => void;
   onRenameFolder: (id: string, name: string) => void;
   onScopeChange: (id: string, scope: FolderScope) => void;
   renamingFolderId: string | null;
@@ -1207,7 +1273,7 @@ interface DriveTableProps {
 
 function DriveTable({
   tab, folderFilter, folders, selectedIds, onSelect, onToggleAll,
-  onNavigateFolder, onDropJob, isAdmin, onDeleteFolder, onDeleteJob, onRenameFolder, onScopeChange,
+  onNavigateFolder, onDropJob, isAdmin, onDeleteFolder, onDeleteJob, onQcToggle, onRenameFolder, onScopeChange,
   renamingFolderId, onStartRename, onCancelRename, onJobContextMenu,
 }: DriveTableProps) {
   const { getToken } = useAuth();
@@ -1371,6 +1437,7 @@ function DriveTable({
             showUser={tab === "all"}
             onContextMenu={onJobContextMenu}
             onDelete={onDeleteJob}
+            onQcToggle={onQcToggle}
           />
         ))
       )}
@@ -1476,6 +1543,18 @@ export default function Jobs() {
       setSelectedIds((prev) => { const s = new Set(prev); s.delete(id); return s; });
       setToast({ message: "Transcript deleted", type: "success" });
     },
+  });
+
+  const { mutate: toggleQc } = useMutation({
+    mutationFn: async ({ id, isDone }: { id: string; isDone: boolean }) => {
+      const token = await getToken();
+      await apiFetch(`/jobs/${id}/qc`, { method: isDone ? "DELETE" : "POST", token: token! });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["jobs"] });
+      qc.invalidateQueries({ queryKey: ["admin-jobs"] });
+    },
+    onError: (e) => setToast({ message: e instanceof Error ? e.message : "QC update failed", type: "error" }),
   });
 
   const { mutate: moveJob } = useMutation({
@@ -1657,6 +1736,7 @@ export default function Jobs() {
           isAdmin={!!isAdmin}
           onDeleteFolder={(id) => deleteFolder(id)}
           onDeleteJob={(id) => deleteJob(id)}
+          onQcToggle={(id, isDone) => toggleQc({ id, isDone })}
           onRenameFolder={(id, name) => { updateFolder({ id, name }); setRenamingFolderId(null); }}
           onScopeChange={(id, scope) => updateFolder({ id, scope })}
           renamingFolderId={renamingFolderId}

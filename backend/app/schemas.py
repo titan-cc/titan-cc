@@ -74,6 +74,8 @@ class JobResponse(BaseModel):
     started_at: datetime | None
     completed_at: datetime | None
     expires_at: datetime
+    qc_done_at: datetime | None = None
+    qc_done_by_email: str | None = None
 
     model_config = {"from_attributes": True}
 

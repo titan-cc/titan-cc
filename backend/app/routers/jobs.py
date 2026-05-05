@@ -1,6 +1,7 @@
 import hashlib
 import json
 import uuid
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Response, status
 from sqlalchemy import and_, or_, select, update
@@ -424,6 +425,34 @@ async def cancel_job(
         from app.services.runpod import cancel_runpod_job
         await cancel_runpod_job(runpod_job_id)
 
+    return JobResponse.model_validate(job)
+
+
+@router.post("/{job_id}/qc", response_model=JobResponse)
+async def mark_qc_done(
+    job_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JobResponse:
+    job = await _get_job_or_404(job_id, user.id, db, is_admin=user.role == "admin")
+    job.qc_done_at = datetime.now(UTC)
+    job.qc_done_by_email = user.email
+    await db.commit()
+    await db.refresh(job)
+    return JobResponse.model_validate(job)
+
+
+@router.delete("/{job_id}/qc", response_model=JobResponse)
+async def clear_qc_done(
+    job_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JobResponse:
+    job = await _get_job_or_404(job_id, user.id, db, is_admin=user.role == "admin")
+    job.qc_done_at = None
+    job.qc_done_by_email = None
+    await db.commit()
+    await db.refresh(job)
     return JobResponse.model_validate(job)
 
 
