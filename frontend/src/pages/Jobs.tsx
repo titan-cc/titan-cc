@@ -1341,7 +1341,7 @@ function DriveTable({
         style={{ borderColor: "#FFC0CB", backgroundColor: "#FFF5F5" }}
       >
         <p className="text-sm font-medium" style={{ color: "#EC008C" }}>
-          Failed to load transcripts.
+          Failed to load transcripts: {error instanceof Error ? error.message : String(error)}
         </p>
       </div>
     );
