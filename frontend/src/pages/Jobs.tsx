@@ -1219,8 +1219,9 @@ function DriveTable({
     queryFn: async () => {
       const token = await getToken();
       const params = new URLSearchParams({ limit: "50" });
-      if (folderFilter === "unfiled") params.set("folder_id", "unfiled");
-      else if (folderFilter !== "all") params.set("folder_id", folderFilter);
+      if (folderFilter === "all") params.set("folder_id", "unfiled");
+      else if (folderFilter === "unfiled") params.set("folder_id", "unfiled");
+      else params.set("folder_id", folderFilter);
       const res = await apiFetch(`/jobs?${params}`, { token: token! });
       return res.json();
     },
@@ -1233,8 +1234,9 @@ function DriveTable({
     queryFn: async () => {
       const token = await getToken();
       const params = new URLSearchParams({ limit: "100" });
-      if (folderFilter === "unfiled") params.set("folder_id", "unfiled");
-      else if (folderFilter !== "all") params.set("folder_id", folderFilter);
+      if (folderFilter === "all") params.set("folder_id", "unfiled");
+      else if (folderFilter === "unfiled") params.set("folder_id", "unfiled");
+      else params.set("folder_id", folderFilter);
       const res = await apiFetch(`/admin/jobs?${params}`, { token: token! });
       return res.json();
     },
