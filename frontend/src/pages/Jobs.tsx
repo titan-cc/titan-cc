@@ -140,12 +140,12 @@ function CheckAllIcon() {
 
 function QcCheckIcon({ filled }: { filled?: boolean }) {
   return filled ? (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
       <circle cx="12" cy="12" r="10" fill="#22c55e" />
-      <path d="M7 12.5l3.5 3.5 6.5-7" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M7 12.5l3.5 3.5 6.5-7" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   ) : (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
       <circle cx="12" cy="12" r="9" />
       <path d="M7 12.5l3.5 3.5 6.5-7" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
