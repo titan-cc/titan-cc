@@ -240,9 +240,10 @@ function PlayerView({
                   isEditing
                     ? { backgroundColor: "var(--surface-raised)", borderColor: "var(--brand-tint)" }
                     : isActive
-                    ? { backgroundColor: "var(--brand-subtle)", borderColor: "var(--brand-tint)" }
-                    : { borderColor: "transparent" }
+                    ? { backgroundColor: "var(--brand-subtle)", borderColor: "var(--brand-tint)", cursor: "pointer" }
+                    : { borderColor: "transparent", cursor: "pointer" }
                 }
+                onClick={() => { if (!isEditing) seekTo(seg.start); }}
                 onMouseEnter={(e) => { if (!isActive && !isEditing) (e.currentTarget as HTMLElement).style.backgroundColor = "var(--surface-raised)"; }}
                 onMouseLeave={(e) => { if (!isActive && !isEditing) (e.currentTarget as HTMLElement).style.backgroundColor = ""; }}
               >
@@ -291,7 +292,7 @@ function PlayerView({
                   {/* Edit pencil — only visible on hover, hidden while editing */}
                   {!isEditing && (
                     <button
-                      onClick={(e) => { e.stopPropagation(); onStartEdit(i); }}
+                      onClick={(e) => { e.stopPropagation(); e.preventDefault(); onStartEdit(i); }}
                       className="opacity-0 group-hover:opacity-100 shrink-0 p-1 rounded-lg transition-ui"
                       style={{ color: "var(--text-tertiary)" }}
                       title="Edit segment"
