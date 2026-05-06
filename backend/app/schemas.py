@@ -259,6 +259,7 @@ class FolderResponse(BaseModel):
     name: str
     scope: str          # 'personal' | 'org'
     owned_by_me: bool
+    parent_id: uuid.UUID | None = None
     created_at: datetime
     job_count: int = 0
 
@@ -272,6 +273,7 @@ class FolderListResponse(BaseModel):
 class FolderCreateRequest(BaseModel):
     name: Annotated[str, Field(min_length=1, max_length=100)]
     scope: str = "personal"   # 'personal' | 'org'
+    parent_id: uuid.UUID | None = None
 
 
 class FolderUpdateRequest(BaseModel):
