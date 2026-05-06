@@ -38,7 +38,6 @@ async def search_transcripts(
         )
         .outerjoin(Folder, Folder.id == Job.folder_id)
         .where(
-            Job.user_id == user.id,
             Job.status == JobStatus.completed,
             Job.transcript_text.isnot(None),
             tsvector.op("@@")(tsquery),

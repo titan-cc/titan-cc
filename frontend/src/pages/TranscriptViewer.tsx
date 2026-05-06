@@ -97,26 +97,43 @@ function SegmentEditor({
   saving,
   onSave,
   onCancel,
+  onSplit,
 }: {
   text: string;
   saving: boolean;
   onSave: (newText: string) => void;
   onCancel: () => void;
+  onSplit: (text1: string, text2: string) => void;
 }) {
   const [value, setValue] = useState(text);
+  const [cursorPos, setCursorPos] = useState(text.length);
   const ref = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     ref.current?.focus();
-    // Place cursor at end
     const len = ref.current?.value.length ?? 0;
     ref.current?.setSelectionRange(len, len);
+    setCursorPos(len);
   }, []);
+
+  function updateCursor() {
+    setCursorPos(ref.current?.selectionStart ?? value.length);
+  }
 
   function handleKeyDown(e: React.KeyboardEvent) {
     if (e.key === "Escape") { e.preventDefault(); onCancel(); }
     if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); onSave(value.trim()); }
   }
+
+  function handleSplit() {
+    const before = value.slice(0, cursorPos).trimEnd();
+    const after = value.slice(cursorPos).trimStart();
+    if (before && after) onSplit(before, after);
+  }
+
+  const canSplit = cursorPos > 0 && cursorPos < value.length
+    && value.slice(0, cursorPos).trim().length > 0
+    && value.slice(cursorPos).trim().length > 0;
 
   return (
     <div className="flex-1 min-w-0">
@@ -125,6 +142,9 @@ function SegmentEditor({
         value={value}
         onChange={(e) => setValue(e.target.value)}
         onKeyDown={handleKeyDown}
+        onSelect={updateCursor}
+        onClick={updateCursor}
+        onKeyUp={updateCursor}
         rows={Math.max(2, Math.ceil(value.length / 60))}
         className="w-full text-sm leading-relaxed resize-none rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2"
         style={{
@@ -134,7 +154,7 @@ function SegmentEditor({
         }}
         disabled={saving}
       />
-      <div className="flex items-center gap-2 mt-1.5">
+      <div className="flex items-center gap-2 mt-1.5 flex-wrap">
         <button
           onClick={() => onSave(value.trim())}
           disabled={saving || value.trim() === text.trim()}
@@ -144,6 +164,19 @@ function SegmentEditor({
           {saving ? "Saving…" : "Save"}
         </button>
         <button
+          onClick={handleSplit}
+          disabled={saving || !canSplit}
+          className="px-3 py-1 rounded-lg text-xs font-medium transition-ui disabled:opacity-40 flex items-center gap-1"
+          style={{ border: "1px solid var(--brand)", color: "var(--brand)", backgroundColor: "var(--surface)" }}
+          title="Split segment at cursor position"
+        >
+          <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+              d="M8 7h8M8 12h8M8 17h4M3 7l2 5-2 5" />
+          </svg>
+          Split here
+        </button>
+        <button
           onClick={onCancel}
           disabled={saving}
           className="px-3 py-1 rounded-lg text-xs font-medium transition-ui"
@@ -151,8 +184,8 @@ function SegmentEditor({
         >
           Cancel
         </button>
-        <span className="text-[10px] ml-1" style={{ color: "var(--text-tertiary)" }}>
-          Ctrl+↵ save · Esc cancel
+        <span className="text-[10px] ml-auto" style={{ color: "var(--text-tertiary)" }}>
+          Ctrl+↵ save · Esc cancel · place cursor then Split
         </span>
       </div>
     </div>
@@ -169,6 +202,7 @@ function PlayerView({
   onStartEdit,
   onSaveEdit,
   onCancelEdit,
+  onSplitEdit,
 }: {
   videoUrl: string | null | undefined;
   segments: TranscriptSegment[];
@@ -177,10 +211,12 @@ function PlayerView({
   onStartEdit: (idx: number) => void;
   onSaveEdit: (idx: number, text: string) => void;
   onCancelEdit: () => void;
+  onSplitEdit: (idx: number, text1: string, text2: string) => void;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const activeRef = useRef<HTMLDivElement>(null);
   const [currentTime, setCurrentTime] = useState(0);
+  const [captionsEnabled, setCaptionsEnabled] = useState(false);
 
   const allSpeakers = [...new Set(segments.map((s) => s.speaker).filter(Boolean))] as string[];
 
@@ -189,6 +225,12 @@ function PlayerView({
     if (segments[i].start <= currentTime) activeIdx = i;
     else break;
   }
+
+  // Caption text: only show while inside the active segment's time range
+  const captionText =
+    captionsEnabled && activeIdx >= 0 && segments[activeIdx].end >= currentTime
+      ? segments[activeIdx].text
+      : null;
 
   useEffect(() => {
     activeRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
@@ -203,16 +245,47 @@ function PlayerView({
   return (
     <div className="flex flex-col lg:flex-row gap-4" style={{ height: "calc(100vh - 224px)", minHeight: 400 }}>
       {/* Video panel */}
-      <div className="lg:w-1/2 flex flex-col">
+      <div className="lg:w-1/2 flex flex-col gap-2">
+        {/* CC toggle — sits in the same row as the video, flush right */}
+        <div className="flex items-center justify-end">
+          <button
+            onClick={() => setCaptionsEnabled(!captionsEnabled)}
+            className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold transition-ui"
+            style={
+              captionsEnabled
+                ? { backgroundColor: "var(--brand)", color: "#fff" }
+                : { border: "1px solid var(--border)", color: "var(--text-secondary)", backgroundColor: "var(--surface)" }
+            }
+            title={captionsEnabled ? "Hide captions" : "Show captions below video"}
+          >
+            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M7 8h10M7 12h6m-8 8h14a2 2 0 002-2V6a2 2 0 00-2-2H3a2 2 0 00-2 2v14a2 2 0 002 2z" />
+            </svg>
+            CC
+          </button>
+        </div>
+
         {videoUrl ? (
-          <video
-            ref={videoRef}
-            src={videoUrl}
-            controls
-            onTimeUpdate={() => setCurrentTime(videoRef.current?.currentTime ?? 0)}
-            className="w-full rounded-2xl bg-black"
-            style={{ maxHeight: "100%", border: "1px solid var(--border)" }}
-          />
+          <>
+            <video
+              ref={videoRef}
+              src={videoUrl}
+              controls
+              onTimeUpdate={() => setCurrentTime(videoRef.current?.currentTime ?? 0)}
+              className="w-full rounded-2xl bg-black"
+              style={{ border: "1px solid var(--border)" }}
+            />
+            {/* Caption bar — always reserves space when CC is on to prevent layout shift */}
+            {captionsEnabled && (
+              <div
+                className="rounded-xl px-4 py-2.5 text-sm text-center leading-snug min-h-[2.5rem] flex items-center justify-center"
+                style={{ backgroundColor: "var(--surface-subtle)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
+              >
+                {captionText ?? <span style={{ color: "var(--text-tertiary)" }}>—</span>}
+              </div>
+            )}
+          </>
         ) : (
           <div className="flex-1 rounded-2xl flex items-center justify-center"
             style={{ border: "1px solid var(--border)", backgroundColor: "var(--surface-subtle)" }}>
@@ -235,7 +308,7 @@ function PlayerView({
               <div
                 key={i}
                 ref={isActive ? activeRef : null}
-                className="group px-3 py-2 rounded-xl border transition-ui"
+                className={`group px-3 py-2 rounded-xl border transition-ui${!isEditing ? " cursor-pointer" : ""}`}
                 style={
                   isEditing
                     ? { backgroundColor: "var(--surface-raised)", borderColor: "var(--brand-tint)" }
@@ -248,15 +321,13 @@ function PlayerView({
                 onMouseLeave={(e) => { if (!isActive && !isEditing) (e.currentTarget as HTMLElement).style.backgroundColor = ""; }}
               >
                 <div className="flex items-start gap-2.5">
-                  {/* Timestamp — click to seek */}
-                  <button
-                    onClick={() => !isEditing && seekTo(seg.start)}
+                  {/* Timestamp */}
+                  <span
                     className="text-[11px] font-mono shrink-0 pt-0.5 tabular-nums w-10 text-left"
                     style={{ color: "var(--text-tertiary)" }}
-                    title="Seek to this position"
                   >
                     {fmtTime(seg.start)}
-                  </button>
+                  </span>
 
                   <div className="flex-1 min-w-0">
                     {seg.speaker && (
@@ -275,6 +346,7 @@ function PlayerView({
                         saving={saving}
                         onSave={(newText) => onSaveEdit(i, newText)}
                         onCancel={onCancelEdit}
+                        onSplit={(t1, t2) => onSplitEdit(i, t1, t2)}
                       />
                     ) : (
                       <span
@@ -289,7 +361,7 @@ function PlayerView({
                     )}
                   </div>
 
-                  {/* Edit pencil — only visible on hover, hidden while editing */}
+                  {/* Edit pencil */}
                   {!isEditing && (
                     <button
                       onClick={(e) => { e.stopPropagation(); e.preventDefault(); onStartEdit(i); }}
@@ -386,6 +458,7 @@ function SpeakerView({
   onStartEdit,
   onSaveEdit,
   onCancelEdit,
+  onSplitEdit,
 }: {
   segments: TranscriptSegment[];
   editingIdx: number | null;
@@ -393,6 +466,7 @@ function SpeakerView({
   onStartEdit: (idx: number) => void;
   onSaveEdit: (idx: number, text: string) => void;
   onCancelEdit: () => void;
+  onSplitEdit: (idx: number, text1: string, text2: string) => void;
 }) {
   const allSpeakers = [...new Set(segments.map((s) => s.speaker).filter(Boolean))] as string[];
 
@@ -410,7 +484,6 @@ function SpeakerView({
     );
   }
 
-  // Merge consecutive segments from the same speaker (keep original indices)
   const groups: { speaker: string; segs: { idx: number; seg: TranscriptSegment }[] }[] = [];
   segments.forEach((seg, idx) => {
     const spk = seg.speaker ?? "Unknown";
@@ -455,6 +528,7 @@ function SpeakerView({
                       saving={saving}
                       onSave={(newText) => onSaveEdit(idx, newText)}
                       onCancel={onCancelEdit}
+                      onSplit={(t1, t2) => onSplitEdit(idx, t1, t2)}
                     />
                   ) : (
                     <>
@@ -550,12 +624,8 @@ export default function TranscriptViewer() {
     enabled: !!id,
     staleTime: 4 * 60 * 1000,
     gcTime: 5 * 60 * 1000,
-    // Presigned download URLs expire after 5 min; refresh every 4 min so they
-    // never silently expire while the viewer is open. This also re-keys the
-    // transcript-content query (keyed by jsonUrl) so the JSON re-fetches from
-    // the new URL if TanStack Query has GC'd the cached content.
     refetchInterval: 4 * 60 * 1000,
-    refetchIntervalInBackground: false, // pause when tab hidden; refetchOnWindowFocus handles return
+    refetchIntervalInBackground: false,
   });
 
   const jsonUrl = meta?.downloads?.json?.url;
@@ -568,14 +638,12 @@ export default function TranscriptViewer() {
     gcTime: 5 * 60 * 1000,
   });
 
-  // Initialise local mutable segments from loaded content
   useEffect(() => {
     if (content?.segments) setLocalSegments(content.segments);
   }, [content]);
 
   const hasSpeakers = localSegments.some((s) => s.speaker);
 
-  // Save mutation — PUT /jobs/:id/transcript with full updated segments
   const saveMutation = useMutation({
     mutationFn: async (segments: TranscriptSegment[]) => {
       const token = await getToken();
@@ -586,13 +654,17 @@ export default function TranscriptViewer() {
       });
       return res.json() as Promise<TranscriptResponse>;
     },
-    onSuccess: (updatedMeta) => {
-      // Update the transcript meta cache (fresh presigned URLs)
+    onSuccess: (updatedMeta, savedSegments) => {
       queryClient.setQueryData(["transcript", id], updatedMeta);
-      // Update local content cache so re-fetching the JSON URL returns updated segments
+      // Populate the new content cache key directly — avoids a round-trip to S3
+      // and prevents the content query from entering a loading state (which would
+      // unmount the viewer and snap scroll back to top).
       const newJsonUrl = updatedMeta.downloads?.json?.url;
       if (newJsonUrl) {
-        queryClient.invalidateQueries({ queryKey: ["transcript-content"] });
+        queryClient.setQueryData<TranscriptContent>(["transcript-content", newJsonUrl], {
+          job_id: id!,
+          segments: savedSegments,
+        });
       }
       setEditingIdx(null);
       setSavedVisible(true);
@@ -612,17 +684,50 @@ export default function TranscriptViewer() {
     saveMutation.mutate(updated);
   }
 
+  function handleSplitEdit(idx: number, text1: string, text2: string) {
+    const original = localSegments[idx];
+    // Split time proportional to character count (best approximation without word-level data)
+    const totalChars = text1.length + text2.length;
+    const splitTime = totalChars > 0
+      ? original.start + (original.end - original.start) * (text1.length / totalChars)
+      : (original.start + original.end) / 2;
+
+    const seg1: TranscriptSegment = {
+      start: original.start,
+      end: Math.round(splitTime * 1000) / 1000,
+      text: text1,
+      speaker: original.speaker,
+    };
+    const seg2: TranscriptSegment = {
+      start: Math.round(splitTime * 1000) / 1000,
+      end: original.end,
+      text: text2,
+      speaker: original.speaker,
+    };
+
+    const updated = [
+      ...localSegments.slice(0, idx),
+      seg1,
+      seg2,
+      ...localSegments.slice(idx + 1),
+    ];
+    setLocalSegments(updated);
+    saveMutation.mutate(updated);
+  }
+
   function handleCancelEdit() {
     setEditingIdx(null);
   }
 
-  if (metaLoading || contentLoading) return <Skeleton />;
+  // Only block the UI on the very first load — never during post-save refetches
+  // where localSegments is already populated and the viewer should stay mounted.
+  if ((metaLoading || contentLoading) && localSegments.length === 0) return <Skeleton />;
 
-  if (!meta || !content) {
+  if (!meta || (!content && localSegments.length === 0)) {
     return (
       <div className="max-w-lg">
         <Link
-          to={`/jobs/${id}`}
+          to="/jobs"
           className="inline-flex items-center gap-1.5 text-sm transition-ui mb-6"
           style={{ color: "var(--text-tertiary)" }}
         >
@@ -644,7 +749,7 @@ export default function TranscriptViewer() {
       <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-6">
         <div className="flex items-center gap-3 flex-1 min-w-0">
           <Link
-            to={`/jobs/${id}`}
+            to="/jobs"
             className="inline-flex items-center gap-1.5 text-sm transition-ui shrink-0"
             style={{ color: "var(--text-tertiary)" }}
           >
@@ -710,6 +815,7 @@ export default function TranscriptViewer() {
           onStartEdit={handleStartEdit}
           onSaveEdit={handleSaveEdit}
           onCancelEdit={handleCancelEdit}
+          onSplitEdit={handleSplitEdit}
         />
       )}
       {tab === "text" && <TextView segments={localSegments} />}
@@ -721,6 +827,7 @@ export default function TranscriptViewer() {
           onStartEdit={handleStartEdit}
           onSaveEdit={handleSaveEdit}
           onCancelEdit={handleCancelEdit}
+          onSplitEdit={handleSplitEdit}
         />
       )}
     </div>

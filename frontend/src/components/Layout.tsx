@@ -140,7 +140,7 @@ function NavItem({
 
 const MAIN_NAV = [
   { to: "/upload",   label: "Upload",   icon: <UploadIcon />   },
-  { to: "/jobs",     label: "Jobs",     icon: <JobsIcon />     },
+  { to: "/jobs",     label: "Transcripts", icon: <JobsIcon />     },
   { to: "/failures", label: "Failures", icon: <FailuresIcon /> },
 ];
 

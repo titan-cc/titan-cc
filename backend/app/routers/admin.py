@@ -531,6 +531,7 @@ async def list_all_jobs(
     cursor: uuid.UUID | None = None,
     limit: int = Query(50, ge=1, le=100),
     status_filter: str | None = Query(None, alias="status"),
+    folder_id: str | None = Query(None),
     admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> Any:
@@ -546,6 +547,14 @@ async def list_all_jobs(
             q = q.where(Job.status == JobStatus(status_filter))
         except ValueError:
             raise HTTPException(status_code=422, detail=f"Invalid status: {status_filter}")
+
+    if folder_id == "unfiled":
+        q = q.where(Job.folder_id.is_(None))
+    elif folder_id is not None:
+        try:
+            q = q.where(Job.folder_id == uuid.UUID(folder_id))
+        except ValueError:
+            raise HTTPException(status_code=422, detail="Invalid folder_id")
 
     if cursor:
         cursor_result = await db.execute(select(Job.created_at).where(Job.id == cursor))

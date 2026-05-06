@@ -131,6 +131,8 @@ export default function Search() {
               <Link
                 key={hit.job_id}
                 to={`/jobs/${hit.job_id}`}
+                target="_blank"
+                rel="noopener noreferrer"
                 className="flex flex-col px-5 py-4 transition-ui"
                 style={{ borderBottom: "1px solid var(--border)" }}
                 onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = "var(--surface-subtle)")}
