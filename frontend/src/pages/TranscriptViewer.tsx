@@ -238,8 +238,9 @@ function PlayerView({
 
   function seekTo(t: number) {
     if (!videoRef.current) return;
+    const wasPlaying = !videoRef.current.paused;
     videoRef.current.currentTime = t;
-    videoRef.current.play().catch(() => {});
+    if (wasPlaying) videoRef.current.play().catch(() => {});
   }
 
   return (
@@ -727,7 +728,7 @@ export default function TranscriptViewer() {
     return (
       <div className="max-w-lg">
         <Link
-          to="/jobs"
+          to={`/jobs/${id}`}
           className="inline-flex items-center gap-1.5 text-sm transition-ui mb-6"
           style={{ color: "var(--text-tertiary)" }}
         >
@@ -749,7 +750,7 @@ export default function TranscriptViewer() {
       <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-6">
         <div className="flex items-center gap-3 flex-1 min-w-0">
           <Link
-            to="/jobs"
+            to={`/jobs/${id}`}
             className="inline-flex items-center gap-1.5 text-sm transition-ui shrink-0"
             style={{ color: "var(--text-tertiary)" }}
           >
