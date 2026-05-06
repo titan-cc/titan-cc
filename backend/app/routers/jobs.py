@@ -321,6 +321,24 @@ async def update_transcript(
     return TranscriptResponse(downloads=downloads, video_url=video_url)
 
 
+@router.patch("/{job_id}/rename", response_model=JobResponse)
+async def rename_job(
+    job_id: uuid.UUID,
+    body: dict,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JobResponse:
+    name: str = (body.get("filename") or "").strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="filename is required")
+    job = await _get_job_or_404(job_id, user.id, db, is_admin=user.role == "admin")
+    job.input_filename = name
+    job.updated_at = datetime.now(UTC)
+    await db.commit()
+    await db.refresh(job)
+    return JobResponse.model_validate(job)
+
+
 @router.patch("/{job_id}/folder", response_model=JobResponse)
 async def move_to_folder(
     job_id: uuid.UUID,

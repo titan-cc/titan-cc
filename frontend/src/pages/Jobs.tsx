@@ -727,12 +727,21 @@ interface JobRowProps {
   onContextMenu?: (e: React.MouseEvent, jobId: string, currentFolderId: string | null) => void;
   onDelete?: (id: string) => void;
   onQcToggle?: (id: string, isDone: boolean) => void;
+  onRename?: (id: string, name: string) => void;
 }
 
-function JobTableRow({ job, selected, onSelect, isDragging, onDragStart, onDragEnd, showUser, onContextMenu, onDelete, onQcToggle }: JobRowProps) {
+function JobTableRow({ job, selected, onSelect, isDragging, onDragStart, onDragEnd, showUser, onContextMenu, onDelete, onQcToggle, onRename }: JobRowProps) {
   const [hovered, setHovered] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const [editVal, setEditVal] = useState(job.input_filename ?? "");
   const isActive = ["queued", "dispatched", "processing"].includes(job.status);
   const to = job.status === "completed" ? `/jobs/${job.id}/transcript` : `/jobs/${job.id}`;
+
+  function commitRename() {
+    const name = editVal.trim();
+    if (name && name !== job.input_filename) onRename?.(job.id, name);
+    setRenaming(false);
+  }
 
   return (
     <div
@@ -780,11 +789,8 @@ function JobTableRow({ job, selected, onSelect, isDragging, onDragStart, onDragE
       </div>
 
       {/* Name */}
-      <Link
-        to={to}
-        draggable={false}
-        className="flex flex-col min-w-0 pr-4 group"
-        onClick={(e) => e.stopPropagation()}
+      <div
+        className="flex flex-col min-w-0 pr-2"
         style={{ alignSelf: "stretch", display: "flex", justifyContent: "center" }}
       >
         <div className="flex items-center gap-2.5 min-w-0">
@@ -792,12 +798,45 @@ function JobTableRow({ job, selected, onSelect, isDragging, onDragStart, onDragE
             <FileIcon />
           </span>
           <div className="min-w-0 flex-1">
-            <span
-              className="text-sm font-medium truncate block transition-colors duration-150"
-              style={{ color: hovered ? "#00AEEF" : "#1A1A1A" }}
-            >
-              {job.input_filename ?? `${job.id.slice(0, 8)}…`}
-            </span>
+            {renaming ? (
+              <form onSubmit={(e) => { e.preventDefault(); commitRename(); }} onClick={(e) => e.stopPropagation()}>
+                <input
+                  autoFocus
+                  value={editVal}
+                  onChange={(e) => setEditVal(e.target.value)}
+                  onBlur={commitRename}
+                  onKeyDown={(e) => { if (e.key === "Escape") { setEditVal(job.input_filename ?? ""); setRenaming(false); } }}
+                  className="w-full text-sm bg-transparent outline-none border-b-2 px-0 pb-0.5"
+                  style={{ borderColor: "#00AEEF", color: "#1A1A1A", fontWeight: 500, caretColor: "#00AEEF" }}
+                />
+              </form>
+            ) : (
+              <Link
+                to={to}
+                draggable={false}
+                onClick={(e) => e.stopPropagation()}
+                className="flex items-center gap-1.5 min-w-0 group/name"
+              >
+                <span
+                  className="text-sm font-medium truncate transition-colors duration-150"
+                  style={{ color: hovered ? "#00AEEF" : "#1A1A1A" }}
+                >
+                  {job.input_filename ?? `${job.id.slice(0, 8)}…`}
+                </span>
+                {hovered && onRename && (
+                  <button
+                    type="button"
+                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); setEditVal(job.input_filename ?? ""); setRenaming(true); }}
+                    className="shrink-0 p-0.5 rounded transition-colors"
+                    style={{ color: "#B1B3B6" }}
+                    onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "#1A1A1A"; }}
+                    onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "#B1B3B6"; }}
+                  >
+                    <PencilIcon />
+                  </button>
+                )}
+              </Link>
+            )}
             {showUser && job.user_email && (
               <span className="text-[11px] truncate block" style={{ color: "#B1B3B6" }}>
                 {job.user_email}
@@ -824,7 +863,7 @@ function JobTableRow({ job, selected, onSelect, isDragging, onDragStart, onDragE
             }
           </div>
         )}
-      </Link>
+      </div>
 
       {/* Status */}
       <div className="hidden md:block">
@@ -1293,6 +1332,7 @@ interface DriveTableProps {
   onDeleteFolder: (id: string) => void;
   onDeleteJob: (id: string) => void;
   onQcToggle: (id: string, isDone: boolean) => void;
+  onRenameJob: (id: string, name: string) => void;
   onRenameFolder: (id: string, name: string) => void;
   onScopeChange: (id: string, scope: FolderScope) => void;
   renamingFolderId: string | null;
@@ -1328,7 +1368,7 @@ function sortJobs<T extends { input_filename: string | null; input_duration_seco
 
 function DriveTable({
   tab, folderFilter, folders, selectedIds, onSelect, onToggleAll,
-  onNavigateFolder, onDropJob, isAdmin, onDeleteFolder, onDeleteJob, onQcToggle, onRenameFolder, onScopeChange,
+  onNavigateFolder, onDropJob, isAdmin, onDeleteFolder, onDeleteJob, onQcToggle, onRenameJob, onRenameFolder, onScopeChange,
   renamingFolderId, onStartRename, onCancelRename, onJobContextMenu, sortField, sortDir, onSort,
 }: DriveTableProps) {
   const { getToken } = useAuth();
@@ -1497,6 +1537,7 @@ function DriveTable({
             onContextMenu={onJobContextMenu}
             onDelete={onDeleteJob}
             onQcToggle={onQcToggle}
+            onRename={onRenameJob}
           />
         ))
       )}
@@ -1609,6 +1650,18 @@ export default function Jobs() {
       setSelectedIds((prev) => { const s = new Set(prev); s.delete(id); return s; });
       setToast({ message: "Transcript deleted", type: "success" });
     },
+  });
+
+  const { mutate: renameJob } = useMutation({
+    mutationFn: async ({ id, name }: { id: string; name: string }) => {
+      const token = await getToken();
+      await apiFetch(`/jobs/${id}/rename`, { method: "PATCH", token: token!, body: JSON.stringify({ filename: name }) });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["jobs"] });
+      qc.invalidateQueries({ queryKey: ["admin-jobs"] });
+    },
+    onError: (e) => setToast({ message: e instanceof Error ? e.message : "Rename failed", type: "error" }),
   });
 
   const { mutate: toggleQc } = useMutation({
@@ -1803,6 +1856,7 @@ export default function Jobs() {
           onDeleteFolder={(id) => deleteFolder(id)}
           onDeleteJob={(id) => deleteJob(id)}
           onQcToggle={(id, isDone) => toggleQc({ id, isDone })}
+          onRenameJob={(id, name) => renameJob({ id, name })}
           sortField={sortField}
           sortDir={sortDir}
           onSort={handleSort}
