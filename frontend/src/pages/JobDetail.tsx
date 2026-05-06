@@ -1,4 +1,4 @@
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { useAuth } from "@clerk/clerk-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
@@ -348,8 +348,6 @@ function JobTimeline({ job }: { job: Job }) {
 export default function JobDetail() {
   const { id } = useParams<{ id: string }>();
   const { getToken } = useAuth();
-  const navigate = useNavigate();
-
   const { data: job, isLoading, error } = useQuery<Job>({
     queryKey: ["job", id],
     queryFn: async () => {
@@ -363,10 +361,6 @@ export default function JobDetail() {
     },
     enabled: !!id,
   });
-
-  useEffect(() => {
-    if (job?.status === "completed") navigate(`/jobs/${id}/transcript`, { replace: true });
-  }, [job?.status, id, navigate]);
 
   const gpuElapsed = useElapsedSeconds(job?.status === "dispatched" ? job.dispatched_at : null);
 
