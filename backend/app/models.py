@@ -32,6 +32,9 @@ class Folder(Base):
     )
     name: Mapped[str] = mapped_column(Text, nullable=False)
     scope: Mapped[str] = mapped_column(Text, nullable=False, default="personal")  # 'personal' | 'org'
+    parent_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("folders.id", ondelete="CASCADE"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMPTZ, nullable=False, default=lambda: datetime.now(UTC)
     )
@@ -41,6 +44,12 @@ class Folder(Base):
 
     user: Mapped["User"] = relationship("User", back_populates="folders")
     jobs: Mapped[list["Job"]] = relationship("Job", back_populates="folder")
+    children: Mapped[list["Folder"]] = relationship(
+        "Folder", back_populates="parent", foreign_keys="[Folder.parent_id]"
+    )
+    parent: Mapped["Folder | None"] = relationship(
+        "Folder", back_populates="children", foreign_keys="[Folder.parent_id]", remote_side="[Folder.id]"
+    )
 
 
 class JobStatus(str, enum.Enum):

@@ -20,6 +20,7 @@ def _to_response(folder: Folder, job_count: int, user_id: uuid.UUID) -> FolderRe
         name=folder.name,
         scope=folder.scope,
         owned_by_me=folder.user_id == user_id,
+        parent_id=folder.parent_id,
         created_at=folder.created_at,
         job_count=job_count,
     )
@@ -77,20 +78,43 @@ async def create_folder(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> FolderResponse:
-    if body.scope not in _VALID_SCOPES:
+    scope = body.scope
+    parent_id = body.parent_id
+
+    # If creating inside a parent folder, validate it and inherit its scope.
+    if parent_id is not None:
+        parent = (await db.execute(
+            select(Folder).where(
+                Folder.id == parent_id,
+                or_(Folder.user_id == user.id, Folder.scope == "org"),
+            )
+        )).scalar_one_or_none()
+        if parent is None:
+            raise HTTPException(status_code=404, detail="Parent folder not found")
+        scope = parent.scope  # sub-folders always inherit parent scope
+
+    if scope not in _VALID_SCOPES:
         raise HTTPException(status_code=422, detail="scope must be 'personal' or 'org'")
 
-    # Duplicate name check: personal = per-user; org = global
-    if body.scope == "personal":
-        clash_filter = and_(Folder.user_id == user.id, Folder.scope == "personal", Folder.name == body.name)
+    # Name must be unique among siblings (same parent_id within the same scope/owner).
+    if scope == "personal":
+        clash_filter = and_(
+            Folder.user_id == user.id,
+            Folder.scope == "personal",
+            Folder.name == body.name,
+            Folder.parent_id == parent_id,
+        )
     else:
-        clash_filter = and_(Folder.scope == "org", Folder.name == body.name)
+        clash_filter = and_(
+            Folder.scope == "org",
+            Folder.name == body.name,
+            Folder.parent_id == parent_id,
+        )
 
-    existing = (await db.execute(select(Folder).where(clash_filter))).scalar_one_or_none()
-    if existing:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="A folder with that name already exists")
+    if (await db.execute(select(Folder).where(clash_filter))).scalar_one_or_none():
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="A folder with that name already exists here")
 
-    folder = Folder(user_id=user.id, name=body.name, scope=body.scope)
+    folder = Folder(user_id=user.id, name=body.name, scope=scope, parent_id=parent_id)
     db.add(folder)
     await db.commit()
     await db.refresh(folder)
@@ -115,19 +139,25 @@ async def update_folder(
     new_name = body.name or folder.name
     new_scope = body.scope or folder.scope
 
-    # Clash check when renaming or changing scope
+    # Clash check when renaming or changing scope — scoped to the same parent (siblings only).
     if new_name != folder.name or new_scope != folder.scope:
         if new_scope == "personal":
             clash_filter = and_(
-                Folder.user_id == user.id, Folder.scope == "personal",
-                Folder.name == new_name, Folder.id != folder_id,
+                Folder.user_id == user.id,
+                Folder.scope == "personal",
+                Folder.name == new_name,
+                Folder.parent_id == folder.parent_id,
+                Folder.id != folder_id,
             )
         else:
             clash_filter = and_(
-                Folder.scope == "org", Folder.name == new_name, Folder.id != folder_id,
+                Folder.scope == "org",
+                Folder.name == new_name,
+                Folder.parent_id == folder.parent_id,
+                Folder.id != folder_id,
             )
         if (await db.execute(select(Folder).where(clash_filter))).scalar_one_or_none():
-            raise HTTPException(status_code=409, detail="A folder with that name already exists")
+            raise HTTPException(status_code=409, detail="A folder with that name already exists here")
 
     folder.name = new_name
     folder.scope = new_scope

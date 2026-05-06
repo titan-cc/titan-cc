@@ -49,6 +49,7 @@ export interface Folder {
   name: string;
   scope: FolderScope;
   owned_by_me: boolean;
+  parent_id: string | null;
   created_at: string;
   job_count: number;
 }

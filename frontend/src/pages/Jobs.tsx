@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { CSSProperties, Fragment, useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@clerk/clerk-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -195,13 +195,15 @@ function CreateFolderModal({
   onClose,
   onCreate,
   isPending,
+  parentFolder,
 }: {
   onClose: () => void;
-  onCreate: (name: string, scope: FolderScope) => void;
+  onCreate: (name: string, scope: FolderScope, parentId: string | null) => void;
   isPending: boolean;
+  parentFolder: Folder | null;
 }) {
   const [name, setName] = useState("");
-  const [scope, setScope] = useState<FolderScope>("personal");
+  const [scope, setScope] = useState<FolderScope>(parentFolder?.scope ?? "personal");
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -216,7 +218,10 @@ function CreateFolderModal({
   }, [onClose]);
 
   function submit() {
-    if (name.trim() && !isPending) onCreate(name.trim(), scope);
+    if (name.trim() && !isPending) {
+      const effectiveScope = parentFolder ? parentFolder.scope : scope;
+      onCreate(name.trim(), effectiveScope, parentFolder?.id ?? null);
+    }
   }
 
   return (
@@ -244,32 +249,40 @@ function CreateFolderModal({
         </div>
 
         <div className="px-8 pt-6 pb-7 flex flex-col gap-5">
-          {/* Scope selector */}
-          <div
-            className="inline-flex gap-1 p-1 rounded-xl self-start"
-            style={{ backgroundColor: "#F0F1F2" }}
-          >
-            {(["personal", "org"] as FolderScope[]).map((s) => (
-              <button
-                key={s}
-                type="button"
-                onClick={() => setScope(s)}
-                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-[11px] font-semibold transition-all duration-150"
-                style={
-                  scope === s
-                    ? {
-                        backgroundColor: "#00AEEF",
-                        color: "#fff",
-                        boxShadow: "0 1px 4px rgba(0,174,239,0.32)",
-                      }
-                    : { color: "#777878" }
-                }
-              >
-                {s === "personal" ? <LockIcon /> : <GlobeIcon />}
-                {s === "personal" ? "Personal" : "Team"}
-              </button>
-            ))}
-          </div>
+          {/* Scope selector — hidden when creating a sub-folder (inherits parent scope) */}
+          {!parentFolder && (
+            <div
+              className="inline-flex gap-1 p-1 rounded-xl self-start"
+              style={{ backgroundColor: "#F0F1F2" }}
+            >
+              {(["personal", "org"] as FolderScope[]).map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => setScope(s)}
+                  className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-[11px] font-semibold transition-all duration-150"
+                  style={
+                    scope === s
+                      ? {
+                          backgroundColor: "#00AEEF",
+                          color: "#fff",
+                          boxShadow: "0 1px 4px rgba(0,174,239,0.32)",
+                        }
+                      : { color: "#777878" }
+                  }
+                >
+                  {s === "personal" ? <LockIcon /> : <GlobeIcon />}
+                  {s === "personal" ? "Personal" : "Team"}
+                </button>
+              ))}
+            </div>
+          )}
+          {parentFolder && (
+            <div className="flex items-center gap-1.5 text-[12px]" style={{ color: "#777878" }}>
+              <FolderFilledIcon />
+              <span>Inside <strong style={{ color: "#1A1A1A" }}>{parentFolder.name}</strong></span>
+            </div>
+          )}
 
           {/* Folder name input */}
           <div
@@ -1409,12 +1422,13 @@ function DriveTable({
   const error = tab === "my" ? myError : adminError;
   const jobs = tab === "my" ? (myJobsData?.jobs ?? []) : (adminJobsData?.jobs ?? []);
 
-  // Show folder rows only at the root "all" view, not inside a specific folder.
-  // Split into personal (owned by user) and team (org-scoped, shared with everyone).
-  // Both sections appear in "My Files" so non-admin users can still access team folders.
-  const showFolderRows = folderFilter === "all";
-  const personalFolders = showFolderRows ? sortFolders(folders.filter((f) => f.scope === "personal"), sortField, sortDir) : [];
-  const teamFolders = showFolderRows ? sortFolders(folders.filter((f) => f.scope === "org"), sortField, sortDir) : [];
+  // Show sub-folders at any level (root or inside a folder). Never show them in "Unfiled".
+  // At root: direct children with parent_id === null. Inside a folder: direct children of that folder.
+  const currentParentId = folderFilter === "all" ? null : (folderFilter !== "unfiled" ? folderFilter : null);
+  const showFolderRows = folderFilter !== "unfiled";
+  const allChildFolders = showFolderRows ? folders.filter((f) => f.parent_id === currentParentId) : [];
+  const personalFolders = sortFolders(allChildFolders.filter((f) => f.scope === "personal"), sortField, sortDir);
+  const teamFolders = sortFolders(allChildFolders.filter((f) => f.scope === "org"), sortField, sortDir);
   const visibleFolders = [...personalFolders, ...teamFolders];
   const sortedJobs = sortJobs(jobs, sortField, sortDir);
 
@@ -1602,9 +1616,13 @@ export default function Jobs() {
   // ── Mutations ──────────────────────────────────────────────────────────────
 
   const { mutate: createFolder, isPending: isCreating } = useMutation({
-    mutationFn: async ({ name, scope }: { name: string; scope: FolderScope }) => {
+    mutationFn: async ({ name, scope, parent_id }: { name: string; scope: FolderScope; parent_id: string | null }) => {
       const token = await getToken();
-      const res = await apiFetch("/folders", { method: "POST", token: token!, body: JSON.stringify({ name, scope }) });
+      const res = await apiFetch("/folders", {
+        method: "POST",
+        token: token!,
+        body: JSON.stringify({ name, scope, parent_id }),
+      });
       if (!res.ok) throw new Error("Failed");
       return res.json();
     },
@@ -1629,9 +1647,14 @@ export default function Jobs() {
       await apiFetch(`/folders/${id}`, { method: "DELETE", token: token! });
     },
     onSuccess: (_, id) => {
+      // Navigate to root if the current view is the deleted folder or a descendant of it.
+      // We check before invalidation while the folder list still has the deleted entry.
+      if (folderFilter !== "all" && folderFilter !== "unfiled") {
+        const path = getFolderPath(folderFilter);
+        if (path.some((f) => f.id === id)) setFolderFilter("all");
+      }
       qc.invalidateQueries({ queryKey: ["folders"] });
       qc.invalidateQueries({ queryKey: ["jobs"] });
-      if (folderFilter === id) setFolderFilter("all");
       setSelectedIds((prev) => { const s = new Set(prev); s.delete(id); return s; });
       setToast({ message: "Folder deleted", type: "success" });
     },
@@ -1710,8 +1733,10 @@ export default function Jobs() {
   function handleToggleAll(v: boolean) {
     if (!v) { setSelectedIds(new Set()); return; }
     const allIds = new Set<string>();
-    if (folderFilter === "all") folders.forEach((f) => allIds.add(f.id));
-    // Jobs would be added by DriveTable — for now just handle folders in root
+    if (folderFilter !== "unfiled") {
+      const parentId = folderFilter === "all" ? null : folderFilter;
+      folders.filter((f) => f.parent_id === parentId).forEach((f) => allIds.add(f.id));
+    }
     setSelectedIds(allIds);
   }
 
@@ -1754,34 +1779,78 @@ export default function Jobs() {
 
   // ── Breadcrumb ────────────────────────────────────────────────────────────
 
+  function getFolderPath(folderId: string): Folder[] {
+    const path: Folder[] = [];
+    let id: string | null = folderId;
+    const visited = new Set<string>();
+    while (id && !visited.has(id)) {
+      visited.add(id);
+      const f = folders.find((x) => x.id === id);
+      if (!f) break;
+      path.unshift(f);
+      id = f.parent_id;
+    }
+    return path;
+  }
+
   function Breadcrumb() {
+    const rootStyle: CSSProperties = { color: "var(--text-primary)", fontFamily: "'Gotham', system-ui, sans-serif" };
+    const ancestorStyle: CSSProperties = { color: "var(--text-tertiary)", fontFamily: "'Gotham', system-ui, sans-serif" };
+
     if (folderFilter === "all") {
       return (
-        <span className="text-2xl font-bold tracking-tight" style={{ color: "var(--text-primary)", fontFamily: "'Gotham', system-ui, sans-serif" }}>
+        <span className="text-2xl font-bold tracking-tight" style={rootStyle}>
           My Drive
         </span>
       );
     }
+
+    const path = folderFilter !== "unfiled" ? getFolderPath(folderFilter) : [];
+    const trailingLabel = folderFilter === "unfiled" ? "Unfiled" : null;
+
     return (
-      <div className="flex items-center gap-1.5">
+      <div className="flex items-center gap-1.5 flex-wrap">
         <button
           onClick={() => setFolderFilter("all")}
           className="text-2xl font-bold tracking-tight transition-colors"
-          style={{ color: "var(--text-tertiary)", fontFamily: "'Gotham', system-ui, sans-serif" }}
+          style={ancestorStyle}
           onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "#00AEEF"; }}
           onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "var(--text-tertiary)"; }}
         >
           My Drive
         </button>
-        <span style={{ color: "var(--text-tertiary)" }}>
-          <ChevronRightIcon size={18} />
-        </span>
-        <span
-          className="text-2xl font-bold tracking-tight"
-          style={{ color: "var(--text-primary)", fontFamily: "'Gotham', system-ui, sans-serif" }}
-        >
-          {folderFilter === "unfiled" ? "Unfiled" : (currentFolder?.name ?? "…")}
-        </span>
+        {path.map((f, i) => (
+          <Fragment key={f.id}>
+            <span style={{ color: "var(--text-tertiary)" }}>
+              <ChevronRightIcon size={18} />
+            </span>
+            {i < path.length - 1 ? (
+              <button
+                onClick={() => setFolderFilter(f.id)}
+                className="text-2xl font-bold tracking-tight transition-colors"
+                style={ancestorStyle}
+                onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "#00AEEF"; }}
+                onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "var(--text-tertiary)"; }}
+              >
+                {f.name}
+              </button>
+            ) : (
+              <span className="text-2xl font-bold tracking-tight" style={rootStyle}>
+                {f.name}
+              </span>
+            )}
+          </Fragment>
+        ))}
+        {trailingLabel && (
+          <>
+            <span style={{ color: "var(--text-tertiary)" }}>
+              <ChevronRightIcon size={18} />
+            </span>
+            <span className="text-2xl font-bold tracking-tight" style={rootStyle}>
+              {trailingLabel}
+            </span>
+          </>
+        )}
       </div>
     );
   }
@@ -1889,8 +1958,9 @@ export default function Jobs() {
       {showCreateModal && (
         <CreateFolderModal
           onClose={() => setShowCreateModal(false)}
-          onCreate={(name, scope) => createFolder({ name, scope })}
+          onCreate={(name, scope, parentId) => createFolder({ name, scope, parent_id: parentId })}
           isPending={isCreating}
+          parentFolder={currentFolder ?? null}
         />
       )}
 
