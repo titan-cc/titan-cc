@@ -729,7 +729,7 @@ export default function TranscriptViewer() {
     return (
       <div className="max-w-lg">
         <Link
-          to={`/jobs/${id}`}
+          to="/jobs"
           className="inline-flex items-center gap-1.5 text-sm transition-ui mb-6"
           style={{ color: "var(--text-tertiary)" }}
         >
@@ -751,7 +751,7 @@ export default function TranscriptViewer() {
       <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-6">
         <div className="flex items-center gap-3 flex-1 min-w-0">
           <Link
-            to={`/jobs/${id}`}
+            to="/jobs"
             className="inline-flex items-center gap-1.5 text-sm transition-ui shrink-0"
             style={{ color: "var(--text-tertiary)" }}
           >
