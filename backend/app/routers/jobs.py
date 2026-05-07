@@ -16,6 +16,8 @@ from app.schemas import (
     JobCreateRequest,
     JobListResponse,
     JobResponse,
+    TagListResponse,
+    TagUpdateRequest,
     TranscriptResponse,
     TranscriptUpdateRequest,
 )
@@ -149,6 +151,7 @@ async def list_jobs(
     limit: int = 20,
     status: str | None = None,
     folder_id: str | None = None,
+    tag: str | None = None,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> JobListResponse:
@@ -188,6 +191,12 @@ async def list_jobs(
     elif parsed_folder_id is not None:
         q = q.where(Job.folder_id == parsed_folder_id)
 
+    if tag is not None:
+        # Postgres array containment: jobs whose tags column contains the given tag
+        from sqlalchemy.dialects.postgresql import ARRAY
+        from sqlalchemy import Text as SaText
+        q = q.where(Job.tags.contains([tag]))
+
     if cursor is not None:
         cursor_where = [Job.id == cursor]
         if not is_org_folder:
@@ -213,6 +222,27 @@ async def list_jobs(
         jobs = jobs[:limit]
 
     return JobListResponse(jobs=jobs, next_cursor=next_cursor)
+
+
+@router.get("/tags", response_model=TagListResponse)
+async def list_all_tags(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> TagListResponse:
+    """Return the sorted list of distinct tags used across all this user's jobs (admins: all jobs)."""
+    if user.role == "admin":
+        base_q = select(Job.tags).where(Job.tags != [])
+    else:
+        base_q = select(Job.tags).where(Job.user_id == user.id, Job.tags != [])
+
+    rows = (await db.execute(base_q)).scalars().all()
+    # Flatten and deduplicate
+    seen: set[str] = set()
+    for tag_list in rows:
+        if tag_list:
+            for t in tag_list:
+                seen.add(t)
+    return TagListResponse(tags=sorted(seen))
 
 
 @router.get("/{job_id}", response_model=JobResponse)
@@ -469,6 +499,23 @@ async def clear_qc_done(
     job = await _get_job_or_404(job_id, user.id, db, is_admin=user.role == "admin")
     job.qc_done_at = None
     job.qc_done_by_email = None
+    await db.commit()
+    await db.refresh(job)
+    return JobResponse.model_validate(job)
+
+
+@router.patch("/{job_id}/tags", response_model=JobResponse)
+async def update_tags(
+    job_id: uuid.UUID,
+    body: TagUpdateRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JobResponse:
+    """Replace the tag list for a job."""
+    is_admin = user.role == "admin"
+    job = await _get_job_or_404(job_id, user.id, db, is_admin=is_admin)
+    job.tags = body.tags
+    job.updated_at = datetime.now(UTC)
     await db.commit()
     await db.refresh(job)
     return JobResponse.model_validate(job)

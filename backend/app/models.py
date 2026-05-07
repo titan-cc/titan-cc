@@ -15,7 +15,7 @@ from sqlalchemy import (
     func,
 )
 from sqlalchemy import TIMESTAMP
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 
 TIMESTAMPTZ = TIMESTAMP(timezone=True)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -145,6 +145,7 @@ class Job(Base):
         UUID(as_uuid=True), ForeignKey("folders.id", ondelete="CASCADE"), nullable=True
     )
     transcript_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    tags: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False, server_default="{}")
     cost_usd: Mapped[float | None] = mapped_column(Numeric(10, 4), nullable=True)
     expires_at: Mapped[datetime] = mapped_column(
         TIMESTAMPTZ,

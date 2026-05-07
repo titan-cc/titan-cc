@@ -3,8 +3,9 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "@clerk/clerk-react";
 import { useQuery } from "@tanstack/react-query";
 import { apiFetch } from "@/api/client";
-import type { SearchResponse } from "@/api/types";
+import type { SearchResponse, TagListResponse } from "@/api/types";
 import StatusBadge from "@/components/StatusBadge";
+import { TagBadge } from "@/components/TagEditor";
 
 function timeAgo(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
@@ -43,31 +44,64 @@ export default function Search() {
   useEffect(() => { inputRef.current?.focus(); }, []);
 
   const q = params.get("q") ?? "";
+  const tagParam = params.get("tag") ?? "";
+
+  const searchEnabled = q.trim().length > 0 || tagParam.trim().length > 0;
 
   const { data, isFetching, error } = useQuery<SearchResponse>({
-    queryKey: ["search", q],
+    queryKey: ["search", q, tagParam],
     queryFn: async () => {
       const token = await getToken();
-      const res = await apiFetch(`/search?q=${encodeURIComponent(q)}`, { token: token! });
+      const qs = new URLSearchParams();
+      if (q.trim()) qs.set("q", q.trim());
+      if (tagParam.trim()) qs.set("tag", tagParam.trim());
+      const res = await apiFetch(`/search?${qs}`, { token: token! });
       if (!res.ok) throw new Error("Search failed");
       return res.json();
     },
-    enabled: q.trim().length > 0,
+    enabled: searchEnabled,
     staleTime: 30_000,
   });
+
+  // Fetch all tags for tag filter chips
+  const { data: tagsData } = useQuery<TagListResponse>({
+    queryKey: ["job-tags"],
+    queryFn: async () => {
+      const token = await getToken();
+      const res = await apiFetch("/jobs/tags", { token: token! });
+      return res.json();
+    },
+    staleTime: 60_000,
+  });
+  const allTags = tagsData?.tags ?? [];
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const trimmed = inputVal.trim();
-    if (trimmed) navigate(`/search?q=${encodeURIComponent(trimmed)}`);
+    const qs = new URLSearchParams();
+    if (trimmed) qs.set("q", trimmed);
+    if (tagParam) qs.set("tag", tagParam);
+    navigate(`/search?${qs}`);
+  }
+
+  function toggleTag(t: string) {
+    const qs = new URLSearchParams();
+    if (q) qs.set("q", q);
+    if (tagParam === t) {
+      // deselect
+    } else {
+      qs.set("tag", t);
+    }
+    navigate(`/search?${qs}`);
   }
 
   const hits = data?.hits ?? [];
+  const hasInput = searchEnabled;
 
   return (
     <div className="max-w-2xl">
       {/* Search bar */}
-      <form onSubmit={handleSubmit} className="mb-8">
+      <form onSubmit={handleSubmit} className="mb-4">
         <div
           className="flex items-center gap-3 px-4 py-3 rounded-2xl"
           style={{ backgroundColor: "var(--surface)", border: "1px solid var(--border-strong, var(--border))" }}
@@ -87,7 +121,7 @@ export default function Search() {
           {isFetching && (
             <span className="text-[11px]" style={{ color: "var(--text-tertiary)" }}>Searching…</span>
           )}
-          {inputVal && (
+          {(inputVal || tagParam) && (
             <button
               type="button"
               onClick={() => { setInputVal(""); navigate("/search"); inputRef.current?.focus(); }}
@@ -100,11 +134,46 @@ export default function Search() {
         </div>
       </form>
 
+      {/* Tag filter chips */}
+      {allTags.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 mb-6">
+          <span className="text-xs self-center mr-1" style={{ color: "var(--text-tertiary)" }}>Tags:</span>
+          {allTags.map((t) => (
+            <button
+              key={t}
+              onClick={() => toggleTag(t)}
+              className={`inline-flex items-center px-2.5 py-0.5 text-xs rounded-full border transition-colors ${
+                tagParam === t
+                  ? "bg-blue-500/30 text-blue-200 border-blue-400"
+                  : "bg-blue-500/10 text-blue-300 border-blue-500/30 hover:bg-blue-500/20"
+              }`}
+            >
+              #{t}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Active tag indicator */}
+      {tagParam && (
+        <div className="mb-4 flex items-center gap-2">
+          <span className="text-xs" style={{ color: "var(--text-tertiary)" }}>Filtering by tag:</span>
+          <TagBadge tag={tagParam} />
+          <button
+            onClick={() => toggleTag(tagParam)}
+            className="text-xs"
+            style={{ color: "var(--text-tertiary)" }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* Results */}
-      {q && !isFetching && !error && hits.length === 0 && (
+      {hasInput && !isFetching && !error && hits.length === 0 && (
         <div className="text-center py-16">
           <p className="text-sm font-medium" style={{ color: "var(--text-secondary)" }}>
-            No results for "<span style={{ color: "var(--text-primary)" }}>{q}</span>"
+            No results found
           </p>
           <p className="text-xs mt-1" style={{ color: "var(--text-tertiary)" }}>
             Only completed transcriptions are searchable.
@@ -121,7 +190,9 @@ export default function Search() {
       {hits.length > 0 && (
         <div>
           <p className="text-xs mb-4" style={{ color: "var(--text-tertiary)" }}>
-            {hits.length} result{hits.length !== 1 ? "s" : ""} for "<span style={{ color: "var(--text-secondary)" }}>{q}</span>"
+            {hits.length} result{hits.length !== 1 ? "s" : ""}
+            {q ? <> for "<span style={{ color: "var(--text-secondary)" }}>{q}</span>"</> : null}
+            {tagParam ? <> tagged <TagBadge tag={tagParam} /></> : null}
           </p>
           <div
             className="rounded-2xl overflow-hidden divide-y shadow-card"
@@ -164,16 +235,32 @@ export default function Search() {
                   </div>
                 </div>
                 {hit.snippet && <Snippet html={hit.snippet} />}
+                {/* Tags */}
+                {hit.tags && hit.tags.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mt-2">
+                    {hit.tags.map((t) => (
+                      <TagBadge
+                        key={t}
+                        tag={t}
+                        onClick={(e?: React.MouseEvent) => {
+                          e?.preventDefault();
+                          e?.stopPropagation();
+                          toggleTag(t);
+                        }}
+                      />
+                    ))}
+                  </div>
+                )}
               </Link>
             ))}
           </div>
         </div>
       )}
 
-      {!q && (
+      {!hasInput && (
         <div className="text-center py-16">
           <p className="text-sm" style={{ color: "var(--text-tertiary)" }}>
-            Type a keyword to search across all your transcripts.
+            Type a keyword or select a tag to search across all transcripts.
           </p>
         </div>
       )}

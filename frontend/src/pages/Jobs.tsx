@@ -9,6 +9,7 @@ import type {
   FolderListResponse,
   FolderScope,
   JobListResponse,
+  TagListResponse,
   UserMeResponse,
 } from "@/api/types";
 import StatusBadge from "@/components/StatusBadge";
@@ -1335,6 +1336,7 @@ type FolderFilter = "all" | "unfiled" | string;
 interface DriveTableProps {
   tab: "my" | "all";
   folderFilter: FolderFilter;
+  tagFilter: string | null;
   folders: Folder[];
   selectedIds: Set<string>;
   onSelect: (id: string, v: boolean) => void;
@@ -1380,7 +1382,7 @@ function sortJobs<T extends { input_filename: string | null; input_duration_seco
 }
 
 function DriveTable({
-  tab, folderFilter, folders, selectedIds, onSelect, onToggleAll,
+  tab, folderFilter, tagFilter, folders, selectedIds, onSelect, onToggleAll,
   onNavigateFolder, onDropJob, isAdmin, onDeleteFolder, onDeleteJob, onQcToggle, onRenameJob, onRenameFolder, onScopeChange,
   renamingFolderId, onStartRename, onCancelRename, onJobContextMenu, sortField, sortDir, onSort,
 }: DriveTableProps) {
@@ -1389,13 +1391,14 @@ function DriveTable({
 
   // Jobs query
   const { data: myJobsData, isLoading: myLoading, error: myError } = useQuery<JobListResponse>({
-    queryKey: ["jobs", folderFilter],
+    queryKey: ["jobs", folderFilter, tagFilter],
     queryFn: async () => {
       const token = await getToken();
       const params = new URLSearchParams({ limit: "50" });
       if (folderFilter === "all") params.set("folder_id", "unfiled");
       else if (folderFilter === "unfiled") params.set("folder_id", "unfiled");
       else params.set("folder_id", folderFilter);
+      if (tagFilter) params.set("tag", tagFilter);
       const res = await apiFetch(`/jobs?${params}`, { token: token! });
       return res.json();
     },
@@ -1404,13 +1407,14 @@ function DriveTable({
   });
 
   const { data: adminJobsData, isLoading: adminLoading, error: adminError } = useQuery<AdminJobListResponse>({
-    queryKey: ["admin-jobs", folderFilter],
+    queryKey: ["admin-jobs", folderFilter, tagFilter],
     queryFn: async () => {
       const token = await getToken();
       const params = new URLSearchParams({ limit: "100" });
       if (folderFilter === "all") params.set("folder_id", "unfiled");
       else if (folderFilter === "unfiled") params.set("folder_id", "unfiled");
       else params.set("folder_id", folderFilter);
+      if (tagFilter) params.set("tag", tagFilter);
       const res = await apiFetch(`/admin/jobs?${params}`, { token: token! });
       return res.json();
     },
@@ -1570,6 +1574,7 @@ export default function Jobs() {
 
   const [tab, setTab] = useState<Tab>("my");
   const [folderFilter, setFolderFilter] = useState<FolderFilter>("all");
+  const [tagFilter, setTagFilter] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
@@ -1604,6 +1609,17 @@ export default function Jobs() {
     staleTime: 30_000,
   });
 
+  const { data: tagsData } = useQuery<TagListResponse>({
+    queryKey: ["job-tags"],
+    queryFn: async () => {
+      const token = await getToken();
+      const res = await apiFetch("/jobs/tags", { token: token! });
+      return res.json();
+    },
+    staleTime: 30_000,
+  });
+
+  const allTags = tagsData?.tags ?? [];
   const folders = foldersData?.folders ?? [];
   const folderIdSet = new Set(folders.map((f) => f.id));
   const isAdmin = me?.role === "admin";
@@ -1911,10 +1927,38 @@ export default function Jobs() {
           }}
         />
 
+        {/* Tag filter chips */}
+        {allTags.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 px-4 py-2 border-b border-[var(--border)]">
+            {tagFilter && (
+              <button
+                onClick={() => setTagFilter(null)}
+                className="inline-flex items-center gap-1 px-2.5 py-0.5 text-xs rounded-full bg-[var(--surface-raised)] text-[var(--text-secondary)] border border-[var(--border)] hover:border-red-400 hover:text-red-400 transition-colors"
+              >
+                ✕ clear tag
+              </button>
+            )}
+            {allTags.map((t) => (
+              <button
+                key={t}
+                onClick={() => setTagFilter(tagFilter === t ? null : t)}
+                className={`inline-flex items-center px-2.5 py-0.5 text-xs rounded-full border transition-colors ${
+                  tagFilter === t
+                    ? "bg-blue-500/30 text-blue-200 border-blue-400"
+                    : "bg-blue-500/10 text-blue-300 border-blue-500/30 hover:bg-blue-500/20"
+                }`}
+              >
+                #{t}
+              </button>
+            ))}
+          </div>
+        )}
+
         {/* Table */}
         <DriveTable
           tab={tab}
           folderFilter={folderFilter}
+          tagFilter={tagFilter}
           folders={folders}
           selectedIds={selectedIds}
           onSelect={handleSelect}

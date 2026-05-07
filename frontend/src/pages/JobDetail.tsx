@@ -7,6 +7,7 @@ import { useTranscript } from "@/api/hooks";
 import type { Folder, FolderListResponse, Job } from "@/api/types";
 import StatusBadge from "@/components/StatusBadge";
 import ProgressBar from "@/components/ProgressBar";
+import { TagEditor } from "@/components/TagEditor";
 import { isTerminal } from "@/lib/poll";
 
 function useElapsedSeconds(since: string | null | undefined): number {
@@ -476,6 +477,12 @@ export default function JobDetail() {
         <MetaRow label="Retries" value={job.retry_count} />
         <MetaRow label="Expires" value={formatDate(job.expires_at)} />
         <MoveToFolder job={job} />
+        <div className="flex items-start gap-3 py-2 border-b border-[var(--border)]">
+          <span className="text-xs text-[var(--text-tertiary)] w-20 shrink-0 pt-0.5">Tags</span>
+          <div className="flex-1">
+            <TagEditor jobId={job.id} tags={job.tags ?? []} />
+          </div>
+        </div>
 
         {/* Timeline */}
         <JobTimeline job={job} />

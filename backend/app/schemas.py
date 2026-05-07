@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Annotated, Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.models import FailureClass, JobStatus
 
@@ -65,6 +65,7 @@ class JobResponse(BaseModel):
     input_duration_seconds: int
     config: dict[str, Any]
     folder_id: uuid.UUID | None = None
+    tags: list[str] = []
     failure_class: FailureClass | None
     failure_code: str | None
     failure_message: str | None
@@ -78,6 +79,31 @@ class JobResponse(BaseModel):
     qc_done_by_email: str | None = None
 
     model_config = {"from_attributes": True}
+
+
+class TagUpdateRequest(BaseModel):
+    tags: list[str] = Field(default_factory=list)
+
+    @field_validator("tags")
+    @classmethod
+    def validate_tags(cls, v: list[str]) -> list[str]:
+        cleaned = []
+        for tag in v:
+            tag = tag.strip().lower()
+            if tag and len(tag) <= 50:
+                cleaned.append(tag)
+        # deduplicate preserving order
+        seen: set[str] = set()
+        result = []
+        for t in cleaned:
+            if t not in seen:
+                seen.add(t)
+                result.append(t)
+        return result
+
+
+class TagListResponse(BaseModel):
+    tags: list[str]
 
 
 class JobListResponse(BaseModel):
@@ -291,6 +317,7 @@ class SearchHit(BaseModel):
     snippet: str
     created_at: datetime
     status: JobStatus
+    tags: list[str] = []
 
 
 class SearchResponse(BaseModel):

@@ -27,6 +27,7 @@ export interface Job {
   input_duration_seconds: number;
   config: Record<string, unknown>;
   folder_id: string | null;
+  tags: string[];
   failure_class: FailureClass | null;
   failure_code: string | null;
   failure_message: string | null;
@@ -68,6 +69,11 @@ export interface SearchHit {
   snippet: string;
   created_at: string;
   status: JobStatus;
+  tags: string[];
+}
+
+export interface TagListResponse {
+  tags: string[];
 }
 
 export interface SearchResponse {
