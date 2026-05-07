@@ -238,9 +238,8 @@ function PlayerView({
 
   function seekTo(t: number) {
     if (!videoRef.current) return;
-    const wasPlaying = !videoRef.current.paused;
     videoRef.current.currentTime = t;
-    if (wasPlaying) videoRef.current.play().catch(() => {});
+    videoRef.current.play().catch(() => {});
   }
 
   return (
@@ -322,13 +321,15 @@ function PlayerView({
                 onMouseLeave={(e) => { if (!isActive && !isEditing) (e.currentTarget as HTMLElement).style.backgroundColor = ""; }}
               >
                 <div className="flex items-start gap-2.5">
-                  {/* Timestamp */}
-                  <span
+                  {/* Timestamp — click to seek */}
+                  <button
+                    onClick={(e) => { e.stopPropagation(); seekTo(seg.start); }}
                     className="text-[11px] font-mono shrink-0 pt-0.5 tabular-nums w-10 text-left"
                     style={{ color: "var(--text-tertiary)" }}
+                    title="Jump to this position"
                   >
                     {fmtTime(seg.start)}
-                  </span>
+                  </button>
 
                   <div className="flex-1 min-w-0">
                     {seg.speaker && (
