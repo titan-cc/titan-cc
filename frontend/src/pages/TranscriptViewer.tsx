@@ -242,30 +242,16 @@ function PlayerView({
     videoRef.current.play().catch(() => {});
   }
 
+  function skip(seconds: number) {
+    if (!videoRef.current) return;
+    const next = Math.max(0, videoRef.current.currentTime + seconds);
+    videoRef.current.currentTime = next;
+  }
+
   return (
     <div className="flex flex-col lg:flex-row gap-4" style={{ height: "calc(100vh - 224px)", minHeight: 400 }}>
       {/* Video panel */}
       <div className="lg:w-1/2 flex flex-col gap-2">
-        {/* CC toggle — sits in the same row as the video, flush right */}
-        <div className="flex items-center justify-end">
-          <button
-            onClick={() => setCaptionsEnabled(!captionsEnabled)}
-            className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold transition-ui"
-            style={
-              captionsEnabled
-                ? { backgroundColor: "var(--brand)", color: "#fff" }
-                : { border: "1px solid var(--border)", color: "var(--text-secondary)", backgroundColor: "var(--surface)" }
-            }
-            title={captionsEnabled ? "Hide captions" : "Show captions below video"}
-          >
-            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                d="M7 8h10M7 12h6m-8 8h14a2 2 0 002-2V6a2 2 0 00-2-2H3a2 2 0 00-2 2v14a2 2 0 002 2z" />
-            </svg>
-            CC
-          </button>
-        </div>
-
         {videoUrl ? (
           <>
             <video
@@ -292,6 +278,59 @@ function PlayerView({
             <p className="text-sm" style={{ color: "var(--text-tertiary)" }}>Video not available</p>
           </div>
         )}
+
+        {/* Toolbar: skip controls + CC toggle */}
+        <div className="flex items-center justify-between">
+          {/* Skip buttons */}
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => skip(-10)}
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium transition-ui"
+              style={{ border: "1px solid var(--border)", color: "var(--text-secondary)", backgroundColor: "var(--surface)" }}
+              onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = "var(--surface-raised)")}
+              onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = "var(--surface)")}
+              title="Back 10 seconds"
+            >
+              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                  d="M12.066 11.2a1 1 0 000 1.6l5.334 4A1 1 0 0019 16V8a1 1 0 00-1.6-.8l-5.333 4zM4.066 11.2a1 1 0 000 1.6l5.334 4A1 1 0 0011 16V8a1 1 0 00-1.6-.8l-5.334 4z" />
+              </svg>
+              10s
+            </button>
+            <button
+              onClick={() => skip(10)}
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium transition-ui"
+              style={{ border: "1px solid var(--border)", color: "var(--text-secondary)", backgroundColor: "var(--surface)" }}
+              onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = "var(--surface-raised)")}
+              onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.backgroundColor = "var(--surface)")}
+              title="Forward 10 seconds"
+            >
+              10s
+              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                  d="M11.933 12.8a1 1 0 000-1.6L6.6 7.2A1 1 0 005 8v8a1 1 0 001.6.8l5.333-4zM19.933 12.8a1 1 0 000-1.6l-5.333-4A1 1 0 0013 8v8a1 1 0 001.6.8l5.333-4z" />
+              </svg>
+            </button>
+          </div>
+
+          {/* CC toggle */}
+          <button
+            onClick={() => setCaptionsEnabled(!captionsEnabled)}
+            className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold transition-ui"
+            style={
+              captionsEnabled
+                ? { backgroundColor: "var(--brand)", color: "#fff" }
+                : { border: "1px solid var(--border)", color: "var(--text-secondary)", backgroundColor: "var(--surface)" }
+            }
+            title={captionsEnabled ? "Hide captions" : "Show captions below video"}
+          >
+            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M7 8h10M7 12h6m-8 8h14a2 2 0 002-2V6a2 2 0 00-2-2H3a2 2 0 00-2 2z" />
+            </svg>
+            CC
+          </button>
+        </div>
       </div>
 
       {/* Transcript panel */}
