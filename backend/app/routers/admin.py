@@ -7,6 +7,7 @@ from typing import Any
 import boto3
 import httpx
 import structlog
+from botocore.exceptions import ClientError
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -73,6 +74,23 @@ def _build_user_response(user: User, job_count: int) -> AdminUserResponse:
 
 # ── Billing fetchers ──────────────────────────────────────────────────────────
 
+def _safe_error(provider: str, exc: Exception) -> str:
+    """
+    A short error for the billing page and logs. Never returns str(exc): httpx
+    errors include the request URL, and a URL or message can carry a secret.
+    """
+    if isinstance(exc, httpx.HTTPStatusError):
+        code = exc.response.status_code
+        if code in (401, 403):
+            return f"{provider} rejected the API key ({code}). Check the key and its permissions."
+        return f"{provider} returned HTTP {code}"
+    if isinstance(exc, httpx.TimeoutException):
+        return f"{provider} did not respond in time"
+    if isinstance(exc, httpx.RequestError):
+        return f"Could not reach {provider}"
+    return f"{provider} billing lookup failed ({type(exc).__name__})"
+
+
 async def _fetch_runpod() -> ProviderBilling:
     period = _billing_period()
     if not settings.runpod_api_key:
@@ -90,8 +108,10 @@ async def _fetch_runpod() -> ProviderBilling:
     """
     try:
         async with httpx.AsyncClient(timeout=10) as client:
+            # Key goes in a header, never the URL: URLs end up in error messages and logs.
             r = await client.post(
-                f"https://api.runpod.io/graphql?api_key={settings.runpod_api_key}",
+                "https://api.runpod.io/graphql",
+                headers={"Authorization": f"Bearer {settings.runpod_api_key}"},
                 json={"query": query},
             )
             r.raise_for_status()
@@ -127,8 +147,9 @@ async def _fetch_runpod() -> ProviderBilling:
             meta=meta,
         )
     except Exception as exc:
-        logger.warning("billing_runpod_error", error=str(exc))
-        return ProviderBilling(provider="runpod", period=period, error=str(exc))
+        msg = _safe_error("RunPod", exc)
+        logger.warning("billing_runpod_error", error=msg)
+        return ProviderBilling(provider="runpod", period=period, error=msg)
 
 
 async def _fetch_railway() -> ProviderBilling:
@@ -198,8 +219,9 @@ async def _fetch_railway() -> ProviderBilling:
 
         return ProviderBilling(provider="railway", period=period, total_usd=total, items=items)
     except Exception as exc:
-        logger.warning("billing_railway_error", error=str(exc))
-        return ProviderBilling(provider="railway", period=period, error=str(exc))
+        msg = _safe_error("Railway", exc)
+        logger.warning("billing_railway_error", error=msg)
+        return ProviderBilling(provider="railway", period=period, error=msg)
 
 
 async def _fetch_aws() -> ProviderBilling:
@@ -244,9 +266,11 @@ async def _fetch_aws() -> ProviderBilling:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, _sync_fetch)
     except Exception as exc:
-        err = str(exc)
+        # Show the AWS error code only (e.g. AccessDeniedException), not the full message.
+        code = exc.response.get("Error", {}).get("Code") if isinstance(exc, ClientError) else None
+        err = f"AWS billing lookup failed ({code or type(exc).__name__})"
         logger.warning("billing_aws_error", error=err)
-        if "DataUnavailableException" in err:
+        if code == "DataUnavailableException":
             return ProviderBilling(
                 provider="aws",
                 period=period,
