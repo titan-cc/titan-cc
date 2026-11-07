@@ -1,4 +1,5 @@
 import asyncio
+import os
 import time
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -152,72 +153,76 @@ async def _fetch_runpod() -> ProviderBilling:
         return ProviderBilling(provider="runpod", period=period, error=msg)
 
 
+# Railway's API reports raw usage, not dollars. Prices from railway.com/pricing
+# (per minute, 30-day month). Update these if Railway changes its prices.
+_RAILWAY_PRICES: dict[str, tuple[str, float]] = {
+    # measurement: (label, USD per unit)
+    "CPU_USAGE": ("CPU", 20 / 43_200),                    # $20 per vCPU-month, unit vCPU-minute
+    "MEMORY_USAGE_GB": ("Memory", 10 / 43_200),           # $10 per GB-month, unit GB-minute
+    "DISK_USAGE_GB": ("Volume storage", 0.15 / 43_200),   # $0.15 per GB-month, unit GB-minute
+    "NETWORK_TX_GB": ("Network egress", 0.05),            # $0.05 per GB
+}
+
+_RAILWAY_USAGE_QUERY = """
+query($projectId: String!, $measurements: [MetricMeasurement!]!) {
+  usage(projectId: $projectId, measurements: $measurements) { measurement value }
+  estimatedUsage(projectId: $projectId, measurements: $measurements) { measurement estimatedValue }
+}
+"""
+
+
 async def _fetch_railway() -> ProviderBilling:
     period = _billing_period()
     if not settings.railway_api_token:
         return ProviderBilling(provider="railway", period=period, error="RAILWAY_API_TOKEN not configured")
+    # Railway sets RAILWAY_PROJECT_ID on every service automatically.
+    project_id = settings.railway_project_id or os.environ.get("RAILWAY_PROJECT_ID", "")
+    if not project_id:
+        return ProviderBilling(provider="railway", period=period, error="RAILWAY_PROJECT_ID not configured")
 
-    # Query current team usage + project list
-    query = """
-    {
-      me {
-        usage {
-          current { estimatedCost }
-          estimated { estimatedCost }
-        }
-        projects {
-          edges {
-            node {
-              id
-              name
-              usage {
-                current { estimatedCost }
-                estimated { estimatedCost }
-              }
-            }
-          }
-        }
-      }
-    }
-    """
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             r = await client.post(
                 "https://backboard.railway.app/graphql/v2",
-                headers={
-                    "Authorization": f"Bearer {settings.railway_api_token}",
-                    "Content-Type": "application/json",
+                headers={"Authorization": f"Bearer {settings.railway_api_token}"},
+                json={
+                    "query": _RAILWAY_USAGE_QUERY,
+                    "variables": {"projectId": project_id, "measurements": list(_RAILWAY_PRICES)},
                 },
-                json={"query": query},
             )
+            data = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
+            # GraphQL errors can come back with HTTP 200 or 400; show Railway's own message.
+            if data.get("errors"):
+                msg = data["errors"][0].get("message", "API error")
+                if msg == "Not Authorized":
+                    msg = "Railway rejected the token. Use an account token from Account Settings > Tokens."
+                return ProviderBilling(provider="railway", period=period, error=msg)
             r.raise_for_status()
-            data = r.json()
 
-        errors = data.get("errors")
-        if errors:
-            return ProviderBilling(provider="railway", period=period, error=errors[0].get("message", "API error"))
+        usage = {u["measurement"]: u["value"] for u in data["data"]["usage"]}
+        estimated = {u["measurement"]: u["estimatedValue"] for u in data["data"]["estimatedUsage"]}
 
-        me = data.get("data", {}).get("me") or {}
-        top_usage = me.get("usage") or {}
-        estimated_cost = top_usage.get("estimated", {}).get("estimatedCost") or \
-                         top_usage.get("current", {}).get("estimatedCost")
-        total = float(estimated_cost) if estimated_cost is not None else None
-
-        # Per-project breakdown
         items: list[BillingLineItem] = []
-        for edge in (me.get("projects", {}).get("edges") or []):
-            node = edge.get("node") or {}
-            proj_usage = node.get("usage") or {}
-            cost_val = (proj_usage.get("estimated") or {}).get("estimatedCost") or \
-                       (proj_usage.get("current") or {}).get("estimatedCost")
-            if cost_val is not None:
-                items.append(BillingLineItem(label=node.get("name", "project"), amount_usd=float(cost_val)))
+        total = 0.0
+        estimated_total = 0.0
+        for measurement, (label, price) in _RAILWAY_PRICES.items():
+            cost = usage.get(measurement, 0.0) * price
+            total += cost
+            estimated_total += estimated.get(measurement, 0.0) * price
+            if cost >= 0.005:
+                items.append(BillingLineItem(label=label, amount_usd=round(cost, 2)))
+        items.sort(key=lambda x: x.amount_usd, reverse=True)
 
-        # If no top-level total but we have items, sum them
-        if total is None and items:
-            total = sum(i.amount_usd for i in items)
-
-        return ProviderBilling(provider="railway", period=period, total_usd=total, items=items)
+        return ProviderBilling(
+            provider="railway",
+            period=period,
+            total_usd=round(total, 2),
+            items=items,
+            meta={
+                "end_of_cycle_estimate": f"${estimated_total:.2f}",
+                "pricing": "Railway list prices, plan credit not deducted",
+            },
+        )
     except Exception as exc:
         msg = _safe_error("Railway", exc)
         logger.warning("billing_railway_error", error=msg)
