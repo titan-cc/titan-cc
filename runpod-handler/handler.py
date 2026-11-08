@@ -39,6 +39,7 @@ from pipeline.vad import get_speech_segments
 from pipeline.transcribe import transcribe
 from pipeline.align import diarize
 from pipeline.format import write_outputs
+from pipeline import vocabulary as vocab_rules
 
 logging.basicConfig(
     level=logging.INFO,
@@ -261,7 +262,8 @@ def handler(job: dict) -> dict:
         alive()  # check after VAD
 
         progress("transcribing", 35)
-        segments = transcribe(str(wav_path), cancel_check=alive)
+        vocab = config.get("vocabulary") or {}
+        segments = transcribe(str(wav_path), cancel_check=alive, hotwords=vocab_rules.hotwords(vocab))
         logger.info("transcribed: job=%s segments=%d", job_id, len(segments))
 
         if config.get("enable_diarization"):
@@ -270,6 +272,15 @@ def handler(job: dict) -> dict:
             segments = diarize(segments, str(wav_path))
 
         alive()  # check before upload
+
+        # Team word list: exact auto-corrections and sound-alike suggestions.
+        # Never allowed to fail the job.
+        try:
+            segments, vocab_counts = vocab_rules.apply(segments, vocab)
+            logger.info("vocabulary_applied: job=%s fixed=%d suggested=%d",
+                        job_id, vocab_counts["fixed"], vocab_counts["suggested"])
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("vocabulary_failed: job=%s error=%s", job_id, exc)
 
         progress("formatting", 85)
         output_formats: list[str] = config.get("output_formats", ["json", "srt", "txt"])

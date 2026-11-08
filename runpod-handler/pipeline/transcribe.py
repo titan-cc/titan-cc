@@ -7,6 +7,7 @@ A threading.Lock guards initialization so concurrent calls never double-load.
 
 from __future__ import annotations
 
+import inspect
 import logging
 import threading
 import wave
@@ -59,11 +60,13 @@ def warmup() -> None:
 def transcribe(
     wav_path: str | Path,
     cancel_check: Callable[[], None] | None = None,
+    hotwords: str | None = None,
 ) -> list[dict]:
     """
     Transcribe a 16 kHz mono WAV file.
 
     cancel_check — optional zero-arg callable called every 10 segments.
+    hotwords — optional comma-separated names and terms from the team word list.
     It should raise JobCancelledError to abort mid-transcription.
 
     Returns a list of segment dicts:
@@ -72,8 +75,17 @@ def transcribe(
     """
     try:
         model = _load_model()
+        # Team word list: names and terms Whisper should expect. `hotwords` is
+        # used on every window (initial_prompt only reaches the first 30 s).
+        extra = {}
+        if hotwords:
+            if "hotwords" in inspect.signature(model.transcribe).parameters:
+                extra["hotwords"] = hotwords
+            else:
+                extra["initial_prompt"] = hotwords
         segments_iter, _info = model.transcribe(
             str(wav_path),
+            **extra,
             language="en",
             word_timestamps=True,
             vad_filter=False,          # VAD already done upstream

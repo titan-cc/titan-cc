@@ -6,6 +6,10 @@ export interface Word {
   start: number;
   end: number;
   prob?: number;
+  /** Word list: what Whisper wrote before the word list corrected it. */
+  auto_from?: string;
+  /** Word list: a suggested spelling for a sound-alike (never applied automatically). */
+  suggest?: string;
 }
 
 export interface Segment {
@@ -74,7 +78,11 @@ export function withNewText(seg: Segment, text: string): Segment {
   if (old.length === tokens.length) {
     const words = old.map((w, i) => {
       const changed = w.word.trim() !== tokens[i];
-      return { ...w, word: " " + tokens[i], prob: changed ? 1 : w.prob };
+      if (!changed) return w;
+      // A person rewrote this word, so word-list marks no longer apply.
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { auto_from, suggest, ...rest } = w;
+      return { ...rest, word: " " + tokens[i], prob: 1 };
     });
     return { ...seg, text: clean, words };
   }
@@ -340,5 +348,72 @@ export function replaceWordEverywhere(segments: Segment[], from: string, to: str
     const toks = s.text.split(/\s+/);
     if (!toks.some((t) => bare(t) === from)) return s;
     return withNewText(s, toks.map((t) => (bare(t) === from ? t.replace(from, to) : t)).join(" "));
+  });
+}
+
+// ── Word list marks ───────────────────────────────────────────────────────────
+
+export interface WordListMarks {
+  fixed: number;
+  suggested: number;
+}
+
+export function wordListMarks(segments: Segment[]): WordListMarks {
+  let fixed = 0;
+  let suggested = 0;
+  for (const s of segments) {
+    for (const w of timedWords(s) ?? []) {
+      if (w.auto_from) fixed++;
+      if (w.suggest) suggested++;
+    }
+  }
+  return { fixed, suggested };
+}
+
+/** Swap the bare word inside a token, keeping punctuation. */
+function swapBare(token: string, to: string): string {
+  const t = token.trim();
+  const b = bare(t);
+  return b ? t.replace(b, to) : t;
+}
+
+/** Accept a word-list suggestion (e.g. big -> B!G), keeping the word's timing. */
+export function acceptSuggestion(seg: Segment, wordIndex: number): Segment {
+  const words = timedWords(seg);
+  const w = words?.[wordIndex];
+  if (!words || !w?.suggest) return seg;
+  const next = words.map((x, i) => {
+    if (i !== wordIndex) return x;
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { suggest, ...rest } = x;
+    return { ...rest, word: " " + swapBare(x.word, w.suggest!), prob: 1 };
+  });
+  return { ...seg, text: next.map((x) => x.word.trim()).join(" "), words: next };
+}
+
+/** Dismiss a suggestion, leaving the word as Whisper wrote it. */
+export function dismissSuggestion(seg: Segment, wordIndex: number): Segment {
+  if (!seg.words?.[wordIndex]?.suggest) return seg;
+  const words = seg.words.map((x, i) => {
+    if (i !== wordIndex) return x;
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { suggest, ...rest } = x;
+    return rest;
+  });
+  return { ...seg, words };
+}
+
+/** Put back what Whisper wrote for every word-list correction. */
+export function undoAutoFixes(segments: Segment[]): Segment[] {
+  return segments.map((s) => {
+    const words = timedWords(s);
+    if (!words?.some((w) => w.auto_from)) return s;
+    const next = words.map((w) => {
+      if (!w.auto_from) return w;
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { auto_from, ...rest } = w;
+      return { ...rest, word: " " + w.auto_from };
+    });
+    return { ...s, text: next.map((w) => w.word.trim()).join(" "), words: next };
   });
 }

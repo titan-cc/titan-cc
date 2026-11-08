@@ -110,6 +110,21 @@ export default function TranscriptViewer() {
     onError: () => setSaveState("error"),
   });
 
+  async function handleRemember(term: string, heardAs: string): Promise<boolean> {
+    try {
+      const token = await getToken();
+      await apiFetch("/vocabulary/remember", {
+        token: token!,
+        method: "POST",
+        body: JSON.stringify({ term, heard_as: heardAs }),
+      });
+      queryClient.invalidateQueries({ queryKey: ["vocabulary"] });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   function handleChange(segments: Segment[]) {
     setLocalSegments(segments);
     saveMutation.mutate(segments);
@@ -137,6 +152,7 @@ export default function TranscriptViewer() {
       downloads={meta.downloads}
       saveState={saveState}
       onChange={handleChange}
+      onRemember={handleRemember}
       backLink={BackLink}
     />
   );

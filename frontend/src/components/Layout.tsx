@@ -24,6 +24,14 @@ function JobsIcon() {
   );
 }
 
+function WordsIcon() {
+  return (
+    <svg className="h-[17px] w-[17px] shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.6} aria-hidden="true">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.04A8.97 8.97 0 006 3.75c-1.05 0-2.06.18-3 .51v14.25A8.99 8.99 0 016 18c2.3 0 4.4.87 6 2.29m0-14.25a8.97 8.97 0 016-2.29c1.05 0 2.06.18 3 .51v14.25A8.99 8.99 0 0018 18a8.97 8.97 0 00-6 2.29m0-14.25v14.25" />
+    </svg>
+  );
+}
+
 function FailuresIcon() {
   return (
     <svg className="h-[17px] w-[17px] shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.6}>
@@ -142,6 +150,7 @@ const MAIN_NAV = [
   { to: "/upload",   label: "Upload",   icon: <UploadIcon />   },
   { to: "/jobs",     label: "Transcripts", icon: <JobsIcon />     },
   { to: "/failures", label: "Failures", icon: <FailuresIcon /> },
+  { to: "/words",    label: "Word list", icon: <WordsIcon />  },
 ];
 
 function ActivityIcon() {

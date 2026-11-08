@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db import async_session_factory
 from app.models import Job, JobEvent, JobStatus
 from app.services.runpod import dispatch_job
+from app.services.vocabulary import worker_payload
 
 logger = structlog.get_logger()
 
@@ -56,6 +57,14 @@ async def _tick(db: AsyncSession) -> None:
     await db.commit()
 
     logger.info("dispatcher_claimed", job_id=str(job_id))
+
+    # Send the team word list with the job (not stored on the job). A failure here
+    # must never stop the transcription, so the job goes out without it.
+    try:
+        config = {**(config or {}), "vocabulary": await worker_payload(db)}
+    except Exception as exc:
+        logger.warning("vocabulary_payload_failed", job_id=str(job_id), error=str(exc))
+
     runpod_job_id = await dispatch_job(job_id, claim_token, s3_key, config)
 
     if runpod_job_id:

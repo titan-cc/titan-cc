@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { countWord, replaceWordEverywhere, singleWordFix, timedWords, withNewText, wordRange, type Segment } from "./model";
+import { acceptSuggestion, countWord, dismissSuggestion, replaceWordEverywhere, singleWordFix, timedWords, undoAutoFixes, withNewText, wordListMarks, wordRange, type Segment } from "./model";
 
 function seg(text: string): Segment {
   const words = text.split(" ").map((w, i) => ({ word: " " + w, start: i, end: i + 0.8, prob: 0.4 }));
@@ -62,5 +62,38 @@ describe("fix the others", () => {
     expect(out.map((s) => s.text)).toEqual(["Antano said hi.", "thanks Antano, see you", "Anthanos is different"]);
     expect(out[1].words?.[1]).toMatchObject({ word: " Antano,", start: 1 });
     expect(out[2]).toBe(segs[2]);
+  });
+});
+
+
+describe("word list marks", () => {
+  function marked(): Segment {
+    return {
+      start: 0, end: 3, text: "join Antano, big cohort",
+      words: [
+        { word: " join", start: 0, end: 0.5 },
+        { word: " Antano,", start: 1, end: 1.5, auto_from: "Anthano," },
+        { word: " big", start: 2, end: 2.5, suggest: "B!G" },
+        { word: " cohort", start: 3, end: 3.5 },
+      ],
+    };
+  }
+
+  it("counts, accepts, dismisses and undoes", () => {
+    expect(wordListMarks([marked()])).toEqual({ fixed: 1, suggested: 1 });
+    const accepted = acceptSuggestion(marked(), 2);
+    expect(accepted.text).toBe("join Antano, B!G cohort");
+    expect(accepted.words?.[2]).toMatchObject({ word: " B!G", start: 2 });
+    expect(accepted.words?.[2].suggest).toBeUndefined();
+    expect(dismissSuggestion(marked(), 2).words?.[2]).toEqual({ word: " big", start: 2, end: 2.5 });
+    const undone = undoAutoFixes([marked()])[0];
+    expect(undone.text).toBe("join Anthano, big cohort");
+    expect(undone.words?.[1].auto_from).toBeUndefined();
+  });
+
+  it("drops marks from a word a person rewrites", () => {
+    const edited = withNewText(marked(), "join Antano, BIG cohort");
+    expect(edited.words?.[2]).toEqual({ word: " BIG", start: 2, end: 2.5, prob: 1 });
+    expect(edited.words?.[1].auto_from).toBe("Anthano,");
   });
 });

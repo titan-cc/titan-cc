@@ -254,3 +254,34 @@ class JobEvent(Base):
     )
 
     job: Mapped["Job"] = relationship("Job", back_populates="events")
+
+
+class VocabularyTerm(Base):
+    """
+    The team word list: names, brands and terms Titan should always get right.
+
+    mode: "fix"     replace the exact `variants` spellings with `term` after transcription
+          "context" never replace; suggest `term` where `variants` appear near a `clue`
+                    or written in capitals (sound-alikes such as B!G / big)
+          "hint"    only tell Whisper the word exists
+    """
+
+    __tablename__ = "vocabulary_terms"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    term: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
+    kind: Mapped[str] = mapped_column(Text, nullable=False, default="term")
+    mode: Mapped[str] = mapped_column(Text, nullable=False, default="hint")
+    variants: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False, default=list)
+    clues: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False, default=list)
+    # How many times people confirmed this word (Remember clicks); ranks the hint list.
+    confirmations: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMPTZ, nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        TIMESTAMPTZ, nullable=False, server_default=func.now(), onupdate=func.now()
+    )

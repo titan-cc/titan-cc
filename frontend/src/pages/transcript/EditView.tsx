@@ -1,9 +1,11 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  acceptSuggestion,
   buildCaptions,
   buildParagraphs,
   captionAt,
   countWord,
+  dismissSuggestion,
   findMatches,
   findRegex,
   fmtClock,
@@ -17,6 +19,8 @@ import {
   speakerLabel,
   splitSegment,
   timedWords,
+  undoAutoFixes,
+  wordListMarks,
   wordRange,
   UNSURE_BELOW,
   unsureWords,
@@ -174,11 +178,13 @@ interface ParagraphProps {
   proofread: boolean;
   checked: boolean;
   onToggleCheck: (p: Paragraph) => void;
+  onAccept: (seg: number, word: number) => void;
+  onDismiss: (seg: number, word: number) => void;
 }
 
 const ParagraphBlock = memo(function ParagraphBlock({
   para, segments, time, status, editing, editWord, query, speakerColour, showUnsure,
-  onSeek, onEdit, onSave, onSplit, onCancel, proofread, checked, onToggleCheck,
+  onSeek, onEdit, onSave, onSplit, onCancel, proofread, checked, onToggleCheck, onAccept, onDismiss,
 }: ParagraphProps) {
   const re = findRegex(query);
   const items = [];
@@ -216,18 +222,38 @@ const ParagraphBlock = memo(function ParagraphBlock({
               data-e={w.end}
               onClick={() => onSeek(w.start)}
               onDoubleClick={(e) => { e.stopPropagation(); onEdit(si, wi); }}
-              title={unsure ? `Unclear audio: ${Math.round((w.prob ?? 0) * 100)}% sure` : undefined}
+              title={
+                w.auto_from ? `Corrected by the word list. Whisper wrote "${w.auto_from}"`
+                : w.suggest ? `The word list suggests ${w.suggest}`
+                : unsure ? `Unclear audio: ${Math.round((w.prob ?? 0) * 100)}% sure` : undefined
+              }
               className="cursor-pointer rounded-[3px]"
               style={{
                 color: now ? "#fff" : played ? "var(--text-primary)" : undefined,
                 backgroundColor: now ? "var(--brand-dark)" : undefined,
                 padding: now ? "0 2px" : undefined,
-                textDecoration: unsure ? "underline dotted #B45309 2px" : undefined,
-                textUnderlineOffset: unsure ? 4 : undefined,
+                textDecoration: w.auto_from ? "underline solid #1F9D5C 2px"
+                  : w.suggest || unsure ? "underline dotted #B45309 2px" : undefined,
+                textUnderlineOffset: w.auto_from || w.suggest || unsure ? 4 : undefined,
               }}
             >
               {w.word.trim()}
             </span>
+            {w.suggest && (
+              <span className="inline-flex align-baseline ml-1 rounded-md overflow-hidden text-[12px] font-semibold"
+                style={{ border: "1px solid #F5D49A", backgroundColor: "#FFFBEB" }}>
+                <button onClick={(e) => { e.stopPropagation(); onAccept(si, wi); }} onDoubleClick={(e) => e.stopPropagation()}
+                  className="px-1.5 leading-[20px] hover:bg-[#FEF3C7]" style={{ color: "#92400E" }}
+                  title={`Change to ${w.suggest}`} aria-label={`Change ${w.word.trim()} to ${w.suggest}`}>
+                  {w.suggest}?
+                </button>
+                <button onClick={(e) => { e.stopPropagation(); onDismiss(si, wi); }} onDoubleClick={(e) => e.stopPropagation()}
+                  className="px-1 leading-[20px] hover:bg-[#FEF3C7]" style={{ color: "#92400E", borderLeft: "1px solid #F5D49A" }}
+                  title="Keep it as it is" aria-label={`Keep ${w.word.trim()}`}>
+                  ×
+                </button>
+              </span>
+            )}
           </span>
         );
       });
@@ -299,6 +325,8 @@ export interface EditViewProps {
   saveState: "idle" | "saving" | "saved" | "error";
   onChange: (segments: Segment[]) => void;
   backLink: React.ReactNode;
+  /** Add a corrected spelling to the team word list. Resolves true when saved. */
+  onRemember?: (term: string, heardAs: string) => Promise<boolean>;
 }
 
 const EXPORT_LABELS: Record<string, [string, string]> = {
@@ -307,7 +335,7 @@ const EXPORT_LABELS: Record<string, [string, string]> = {
   json: ["JSON with word timings", ".json"],
 };
 
-export default function EditView({ filename, segments, videoUrl, downloads, saveState, onChange, backLink }: EditViewProps) {
+export default function EditView({ filename, segments, videoUrl, downloads, saveState, onChange, backLink, onRemember }: EditViewProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const playerRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -338,6 +366,8 @@ export default function EditView({ filename, segments, videoUrl, downloads, save
   const [pauseOnEdit, setPauseOnEdit] = useState(true);
   const [rewindOnResume, setRewindOnResume] = useState(true);
   const [fixOffer, setFixOffer] = useState<{ from: string; to: string; count: number } | null>(null);
+  const [rememberIt, setRememberIt] = useState(true);
+  const [marksHidden, setMarksHidden] = useState(false);
   const proofread = mode === "proofread";
 
   function setMode(m: "edit" | "proofread") {
@@ -360,6 +390,7 @@ export default function EditView({ filename, segments, videoUrl, downloads, save
   const caption = cc ? captionAt(captions, time) : null;
   const checkedFlags = useMemo(() => paragraphs.map((p) => isParagraphChecked(segments, p)), [paragraphs, segments]);
   const checkedCount = checkedFlags.filter(Boolean).length;
+  const marks = useMemo(() => wordListMarks(segments), [segments]);
 
   // ── Playback ────────────────────────────────────────────────────────────────
 
@@ -438,8 +469,9 @@ export default function EditView({ filename, segments, videoUrl, downloads, save
     // A name or term fixed here may be wrong elsewhere too: offer to fix the rest.
     const fix = singleWordFix(segments[si].text, clean);
     const count = fix ? countWord(next, fix.from) : 0;
-    setFixOffer(fix && count > 0 ? { ...fix, count } : null);
-  }, [segments, onChange]);
+    setRememberIt(true);
+    setFixOffer(fix && (count > 0 || onRemember) ? { ...fix, count } : null);
+  }, [segments, onChange, onRemember]);
 
   const handleSplit = useCallback((si: number, before: string, after: string) => {
     setEditing(null);
@@ -500,8 +532,35 @@ export default function EditView({ filename, segments, videoUrl, downloads, save
     if (videoRef.current) videoRef.current.playbackRate = r;
   }
 
+  function rememberIfTicked() {
+    if (!fixOffer || !rememberIt || !onRemember) return;
+    const { from, to } = fixOffer;
+    onRemember(to, from).then((ok) => {
+      setCopied(ok ? `${to} added to the word list` : "Couldn't add to the word list");
+      setTimeout(() => setCopied(null), 2200);
+    });
+  }
+
+  const handleAccept = useCallback((si: number, wi: number) => {
+    onChange(segments.map((s, i) => (i === si ? acceptSuggestion(s, wi) : s)));
+  }, [segments, onChange]);
+
+  const handleDismiss = useCallback((si: number, wi: number) => {
+    onChange(segments.map((s, i) => (i === si ? dismissSuggestion(s, wi) : s)));
+  }, [segments, onChange]);
+
+  function nextSuggestion() {
+    const all: number[] = [];
+    segments.forEach((s) => (timedWords(s) ?? []).forEach((w) => { if (w.suggest) all.push(w.start); }));
+    if (!all.length) return;
+    const t = all.find((x) => x > time + 0.05) ?? all[0];
+    seek(Math.max(0, t - 1));
+    lastUserScroll.current = 0;
+  }
+
   function fixTheOthers() {
     if (!fixOffer) return;
+    rememberIfTicked();
     onChange(replaceWordEverywhere(segments, fixOffer.from, fixOffer.to));
     setCopied(`Fixed ${fixOffer.count} more`);
     setTimeout(() => setCopied(null), 1800);
@@ -510,6 +569,7 @@ export default function EditView({ filename, segments, videoUrl, downloads, save
 
   function reviewTheOthers() {
     if (!fixOffer) return;
+    rememberIfTicked();
     setQuery(fixOffer.from);
     setReplacement(fixOffer.to);
     setShowReplace(true);
@@ -519,7 +579,7 @@ export default function EditView({ filename, segments, videoUrl, downloads, save
 
   useEffect(() => {
     if (!fixOffer) return;
-    const t = setTimeout(() => setFixOffer(null), 20000);
+    const t = setTimeout(() => setFixOffer(null), 30000);
     return () => clearTimeout(t);
   }, [fixOffer]);
 
@@ -810,6 +870,28 @@ export default function EditView({ filename, segments, videoUrl, downloads, save
               </button>
             </div>
           )}
+          {!marksHidden && (marks.fixed > 0 || marks.suggested > 0) && (
+            <div role="status" className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2.5 text-[13px]"
+              style={{ backgroundColor: "#F0FBF5", borderBottom: "1px solid #CDEBDB", color: "#14532D" }}>
+              <Icon d={ICONS.check} size={15} />
+              <span className="flex-1 min-w-[220px]">
+                <span className="font-semibold">Word list used.</span>
+                {marks.fixed > 0 && <> {marks.fixed} {marks.fixed === 1 ? "word was" : "words were"} corrected automatically (green underline).</>}
+                {marks.suggested > 0 && <> {marks.suggested} {marks.suggested === 1 ? "suggestion" : "suggestions"} to review.</>}
+              </span>
+              {marks.suggested > 0 && (
+                <button className="h-8 px-3 rounded-lg text-xs font-medium" style={{ border: "1px solid #F5D49A", backgroundColor: "#FFFBEB", color: "#92400E" }}
+                  onClick={nextSuggestion}>Next suggestion</button>
+              )}
+              {marks.fixed > 0 && (
+                <button className="h-8 px-3 rounded-lg text-xs font-medium" style={{ border: "1px solid #CDEBDB", backgroundColor: "#fff", color: "#14532D" }}
+                  onClick={() => onChange(undoAutoFixes(segments))}>Undo corrections</button>
+              )}
+              <button className="h-8 px-2 rounded-lg text-xs font-medium" style={{ color: "#14532D" }} onClick={() => setMarksHidden(true)}
+                aria-label="Hide this message">Hide</button>
+            </div>
+          )}
+
           <div className="flex flex-wrap items-center gap-2 px-3.5 py-3" style={{ borderBottom: "1px solid var(--border)" }}>
             <label className="flex-1 min-w-[200px] flex items-center gap-2 h-9 px-3 rounded-[10px]" style={{ border: "1px solid var(--border)", color: "var(--text-tertiary)" }}>
               <Icon d={ICONS.search} size={15} />
@@ -878,6 +960,8 @@ export default function EditView({ filename, segments, videoUrl, downloads, save
                 proofread={proofread}
                 checked={checkedFlags[pi]}
                 onToggleCheck={toggleCheck}
+                onAccept={handleAccept}
+                onDismiss={handleDismiss}
               />
             ))}
 
@@ -917,18 +1001,38 @@ export default function EditView({ filename, segments, videoUrl, downloads, save
           style={{ backgroundColor: "#2A2431", boxShadow: "0 16px 40px rgba(30,20,40,.3)" }}>
           <span className="text-sm leading-relaxed">
             You changed <span className="line-through opacity-70">{fixOffer.from}</span> to <span className="font-semibold">{fixOffer.to}</span>.
-            It appears <span className="font-semibold">{fixOffer.count} more {fixOffer.count === 1 ? "time" : "times"}</span> in this video.
+            {fixOffer.count > 0 && <> It appears <span className="font-semibold">{fixOffer.count} more {fixOffer.count === 1 ? "time" : "times"}</span> in this video.</>}
           </span>
+          {onRemember && (
+            <label className="flex items-center gap-2 text-[13px] cursor-pointer" style={{ color: "#EDE8F2" }}>
+              <input type="checkbox" checked={rememberIt} onChange={(e) => setRememberIt(e.target.checked)} className="w-4 h-4" style={{ accentColor: "#F472B6" }} />
+              Remember for future videos (adds {fixOffer.to} to the team word list)
+            </label>
+          )}
           <div className="flex flex-wrap gap-2">
-            <button onClick={fixTheOthers} className="h-9 px-4 rounded-[10px] text-[13px] font-semibold" style={{ backgroundColor: "#fff", color: "#2A2431" }}>
-              Fix all {fixOffer.count}
-            </button>
-            <button onClick={reviewTheOthers} className="h-9 px-4 rounded-[10px] text-[13px] font-medium" style={{ border: "1px solid #5B5566" }}>
-              Review one by one
-            </button>
-            <button onClick={() => setFixOffer(null)} className="h-9 px-3 rounded-[10px] text-[13px] font-medium opacity-80">
-              Just this one
-            </button>
+            {fixOffer.count > 0 ? (
+              <>
+                <button onClick={fixTheOthers} className="h-9 px-4 rounded-[10px] text-[13px] font-semibold" style={{ backgroundColor: "#fff", color: "#2A2431" }}>
+                  Fix all {fixOffer.count}
+                </button>
+                <button onClick={reviewTheOthers} className="h-9 px-4 rounded-[10px] text-[13px] font-medium" style={{ border: "1px solid #5B5566" }}>
+                  Review one by one
+                </button>
+                <button onClick={() => { rememberIfTicked(); setFixOffer(null); }} className="h-9 px-3 rounded-[10px] text-[13px] font-medium opacity-80">
+                  Just this one
+                </button>
+              </>
+            ) : (
+              <>
+                <button onClick={() => { rememberIfTicked(); setFixOffer(null); }} disabled={!rememberIt}
+                  className="h-9 px-4 rounded-[10px] text-[13px] font-semibold disabled:opacity-40" style={{ backgroundColor: "#fff", color: "#2A2431" }}>
+                  Remember {fixOffer.to}
+                </button>
+                <button onClick={() => setFixOffer(null)} className="h-9 px-3 rounded-[10px] text-[13px] font-medium opacity-80">
+                  No thanks
+                </button>
+              </>
+            )}
           </div>
         </div>
       )}
