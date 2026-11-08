@@ -14,6 +14,8 @@ export interface Segment {
   text: string;
   speaker?: string | null;
   words?: Word[] | null;
+  /** Proofread mode: a person has checked this sentence. */
+  checked?: boolean | null;
 }
 
 /** A word Whisper was less sure about than this is flagged for checking. */
@@ -289,5 +291,54 @@ export function replaceAll(segments: Segment[], query: string, replacement: stri
   return segments.map((seg) => {
     re.lastIndex = 0;
     return re.test(seg.text) ? withNewText(seg, seg.text.replace(re, replacement)) : seg;
+  });
+}
+
+// ── Proofreading ──────────────────────────────────────────────────────────────
+
+export function isParagraphChecked(segments: Segment[], p: Paragraph): boolean {
+  for (let i = p.first; i <= p.last; i++) if (!segments[i].checked) return false;
+  return true;
+}
+
+export function setParagraphChecked(segments: Segment[], p: Paragraph, checked: boolean): Segment[] {
+  return segments.map((s, i) => (i >= p.first && i <= p.last ? { ...s, checked } : s));
+}
+
+// ── "Fix the others" after a one-word correction ──────────────────────────────
+
+const PUNCT = /^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu;
+const bare = (tok: string) => tok.replace(PUNCT, "");
+
+/**
+ * If an edit changed exactly one word into one other word, return the pair
+ * (without punctuation). Only names and terms qualify: the original word must
+ * contain a capital letter, so everyday words like "big" are never offered.
+ */
+export function singleWordFix(before: string, after: string): { from: string; to: string } | null {
+  const a = norm(before).split(" ").filter(Boolean);
+  const b = norm(after).split(" ").filter(Boolean);
+  if (a.length !== b.length) return null;
+  const diffs = a.map((t, i) => [t, b[i]] as const).filter(([x, y]) => x !== y);
+  if (diffs.length !== 1) return null;
+  const from = bare(diffs[0][0]);
+  const to = bare(diffs[0][1]);
+  if (!from || !to || from === to || !/\p{Lu}/u.test(from)) return null;
+  return { from, to };
+}
+
+/** Occurrences of a word (exact, ignoring surrounding punctuation). */
+export function countWord(segments: Segment[], word: string): number {
+  let n = 0;
+  for (const s of segments) for (const t of s.text.split(/\s+/)) if (bare(t) === word) n++;
+  return n;
+}
+
+/** Replace every exact occurrence of a word, keeping punctuation and word timings. */
+export function replaceWordEverywhere(segments: Segment[], from: string, to: string): Segment[] {
+  return segments.map((s) => {
+    const toks = s.text.split(/\s+/);
+    if (!toks.some((t) => bare(t) === from)) return s;
+    return withNewText(s, toks.map((t) => (bare(t) === from ? t.replace(from, to) : t)).join(" "));
   });
 }

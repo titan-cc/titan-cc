@@ -47,3 +47,11 @@ def test_build_srt_format_and_rounding():
     srt = build_srt([_segment("Hello there.", start=15.6)])
     assert srt.startswith("1\n00:00:15,600 --> ")
     assert srt_time(3661.9996) == "01:01:02,000"
+
+
+def test_segment_update_keeps_checked_flag():
+    from app.schemas import TranscriptSegmentUpdate
+
+    seg = TranscriptSegmentUpdate(start=0, end=1, text="Hi.", checked=True)
+    assert seg.model_dump()["checked"] is True
+    assert TranscriptSegmentUpdate(start=0, end=1, text="Hi.").model_dump()["checked"] is None

@@ -3,12 +3,17 @@ import {
   buildCaptions,
   buildParagraphs,
   captionAt,
+  countWord,
   findMatches,
   findRegex,
   fmtClock,
   fmtShort,
+  isParagraphChecked,
   replaceAll,
+  replaceWordEverywhere,
   segmentAt,
+  setParagraphChecked,
+  singleWordFix,
   speakerLabel,
   splitSegment,
   timedWords,
@@ -166,11 +171,14 @@ interface ParagraphProps {
   onSave: (seg: number, text: string) => void;
   onSplit: (seg: number, before: string, after: string) => void;
   onCancel: () => void;
+  proofread: boolean;
+  checked: boolean;
+  onToggleCheck: (p: Paragraph) => void;
 }
 
 const ParagraphBlock = memo(function ParagraphBlock({
   para, segments, time, status, editing, editWord, query, speakerColour, showUnsure,
-  onSeek, onEdit, onSave, onSplit, onCancel,
+  onSeek, onEdit, onSave, onSplit, onCancel, proofread, checked, onToggleCheck,
 }: ParagraphProps) {
   const re = findRegex(query);
   const items = [];
@@ -245,7 +253,10 @@ const ParagraphBlock = memo(function ParagraphBlock({
     <div
       data-para-start={para.start}
       className="flex gap-4 px-4 py-3 rounded-xl"
-      style={{ backgroundColor: status === "active" ? "var(--brand-subtle)" : undefined }}
+      style={{
+        backgroundColor: status === "active" ? "var(--brand-subtle)" : undefined,
+        opacity: proofread && checked && status !== "active" ? 0.6 : 1,
+      }}
     >
       <div className="w-[72px] shrink-0 flex flex-col gap-1 pt-0.5">
         {para.speaker && (
@@ -256,9 +267,24 @@ const ParagraphBlock = memo(function ParagraphBlock({
           {fmtShort(para.start)}
         </button>
       </div>
-      <p className="m-0 flex-1 min-w-0 text-[16px] leading-[1.75]" style={{ color: status === "past" ? "var(--text-primary)" : "var(--text-secondary)" }}>
+      <p className={`m-0 flex-1 min-w-0 ${proofread ? "text-[18px] leading-[1.8]" : "text-[16px] leading-[1.75]"}`}
+        style={{ color: status === "past" || proofread ? "var(--text-primary)" : "var(--text-secondary)" }}>
         {items}
       </p>
+      {proofread && (
+        <button
+          onClick={() => onToggleCheck(para)}
+          aria-label={checked ? "Paragraph checked, click to undo" : "Mark paragraph checked"}
+          aria-pressed={checked}
+          title={checked ? "Checked" : "Mark checked (Ctrl Enter)"}
+          className="w-8 h-8 shrink-0 rounded-lg flex items-center justify-center mt-0.5"
+          style={checked
+            ? { backgroundColor: "#1F9D5C", border: "1.5px solid #1F9D5C", color: "#fff" }
+            : { backgroundColor: "var(--surface)", border: "1.5px solid var(--border-strong)", color: "transparent" }}
+        >
+          <Icon d={ICONS.check} size={15} />
+        </button>
+      )}
     </div>
   );
 });
@@ -306,6 +332,18 @@ export default function EditView({ filename, segments, videoUrl, downloads, save
   const [helpOpen, setHelpOpen] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
   const [selection, setSelection] = useState<{ x: number; y: number; start: number; end: number; text: string } | null>(null);
+  const [mode, setModeState] = useState<"edit" | "proofread">(() => {
+    try { return localStorage.getItem("titan.transcriptMode") === "proofread" ? "proofread" : "edit"; } catch { return "edit"; }
+  });
+  const [pauseOnEdit, setPauseOnEdit] = useState(true);
+  const [rewindOnResume, setRewindOnResume] = useState(true);
+  const [fixOffer, setFixOffer] = useState<{ from: string; to: string; count: number } | null>(null);
+  const proofread = mode === "proofread";
+
+  function setMode(m: "edit" | "proofread") {
+    setModeState(m);
+    try { localStorage.setItem("titan.transcriptMode", m); } catch { /* private window */ }
+  }
 
   const paragraphs = useMemo(() => buildParagraphs(segments), [segments]);
   const captions = useMemo(() => buildCaptions(segments), [segments]);
@@ -320,6 +358,8 @@ export default function EditView({ filename, segments, videoUrl, downloads, save
   const activeSeg = segmentAt(segments, time);
   const activePara = activeSeg < 0 ? -1 : paragraphs.findIndex((p) => activeSeg >= p.first && activeSeg <= p.last);
   const caption = cc ? captionAt(captions, time) : null;
+  const checkedFlags = useMemo(() => paragraphs.map((p) => isParagraphChecked(segments, p)), [paragraphs, segments]);
+  const checkedCount = checkedFlags.filter(Boolean).length;
 
   // ── Playback ────────────────────────────────────────────────────────────────
 
@@ -354,9 +394,11 @@ export default function EditView({ filename, segments, videoUrl, downloads, save
   const togglePlay = useCallback(() => {
     const v = videoRef.current;
     if (!v) return;
-    if (v.paused) v.play().catch(() => {});
-    else v.pause();
-  }, []);
+    if (v.paused) {
+      if (proofread && rewindOnResume && v.currentTime > 2) v.currentTime -= 2;
+      v.play().catch(() => {});
+    } else v.pause();
+  }, [proofread, rewindOnResume]);
 
   const skip = useCallback((d: number) => {
     const v = videoRef.current;
@@ -391,7 +433,12 @@ export default function EditView({ filename, segments, videoUrl, downloads, save
     const clean = text.trim();
     setEditing(null);
     if (!clean || clean === segments[si].text.trim()) return;
-    onChange(segments.map((s, i) => (i === si ? withNewText(s, clean) : s)));
+    const next = segments.map((s, i) => (i === si ? withNewText(s, clean) : s));
+    onChange(next);
+    // A name or term fixed here may be wrong elsewhere too: offer to fix the rest.
+    const fix = singleWordFix(segments[si].text, clean);
+    const count = fix ? countWord(next, fix.from) : 0;
+    setFixOffer(fix && count > 0 ? { ...fix, count } : null);
   }, [segments, onChange]);
 
   const handleSplit = useCallback((si: number, before: string, after: string) => {
@@ -401,12 +448,80 @@ export default function EditView({ filename, segments, videoUrl, downloads, save
   }, [segments, onChange]);
 
   const handleEdit = useCallback((si: number, word?: number) => {
-    videoRef.current?.pause();
+    if (!proofread || pauseOnEdit) videoRef.current?.pause();
     window.getSelection()?.removeAllRanges(); // drop the double-click word selection
     setSelection(null);
     setEditing({ seg: si, word: word ?? null });
-  }, []);
+  }, [proofread, pauseOnEdit]);
   const handleCancel = useCallback(() => setEditing(null), []);
+
+  // ── Proofreading ────────────────────────────────────────────────────────────
+
+  function scrollToPara(pi: number) {
+    const el = scrollRef.current?.querySelector<HTMLElement>(`[data-para-start="${paragraphs[pi].start}"]`);
+    el?.scrollIntoView({ block: "center", behavior: "smooth" });
+    lastUserScroll.current = 0;
+  }
+
+  function goToNextUnchecked(flags = checkedFlags) {
+    if (!paragraphs.length) return;
+    for (let k = 1; k <= paragraphs.length; k++) {
+      const pi = (Math.max(activePara, -1) + k) % paragraphs.length;
+      if (!flags[pi]) {
+        seek(paragraphs[pi].start);
+        scrollToPara(pi);
+        return;
+      }
+    }
+    setCopied("Every paragraph is checked");
+    setTimeout(() => setCopied(null), 2200);
+  }
+
+  const toggleCheck = useCallback((p: Paragraph) => {
+    onChange(setParagraphChecked(segments, p, !isParagraphChecked(segments, p)));
+  }, [segments, onChange]);
+
+  function checkAndNext() {
+    if (activePara < 0) return goToNextUnchecked();
+    const p = paragraphs[activePara];
+    onChange(setParagraphChecked(segments, p, true));
+    goToNextUnchecked(checkedFlags.map((f, i) => (i === activePara ? true : f)));
+  }
+
+  function replay(seconds: number) {
+    const v = videoRef.current;
+    if (!v) return;
+    v.currentTime = Math.max(0, v.currentTime - seconds);
+    v.play().catch(() => {});
+  }
+
+  function setRateTo(r: number) {
+    setRate(r);
+    if (videoRef.current) videoRef.current.playbackRate = r;
+  }
+
+  function fixTheOthers() {
+    if (!fixOffer) return;
+    onChange(replaceWordEverywhere(segments, fixOffer.from, fixOffer.to));
+    setCopied(`Fixed ${fixOffer.count} more`);
+    setTimeout(() => setCopied(null), 1800);
+    setFixOffer(null);
+  }
+
+  function reviewTheOthers() {
+    if (!fixOffer) return;
+    setQuery(fixOffer.from);
+    setReplacement(fixOffer.to);
+    setShowReplace(true);
+    setMatchIdx(0);
+    setFixOffer(null);
+  }
+
+  useEffect(() => {
+    if (!fixOffer) return;
+    const t = setTimeout(() => setFixOffer(null), 20000);
+    return () => clearTimeout(t);
+  }, [fixOffer]);
 
   function replaceEverything() {
     if (!matches.length) return;
@@ -482,8 +597,15 @@ export default function EditView({ filename, segments, videoUrl, downloads, save
       const mod = e.ctrlKey || e.metaKey;
       if (mod && e.code === "Space") { e.preventDefault(); togglePlay(); return; }
       if (mod && e.key.toLowerCase() === "f") { e.preventDefault(); findRef.current?.focus(); findRef.current?.select(); return; }
+      if (mod && e.key.toLowerCase() === "j") { e.preventDefault(); replay(3); return; }
       if (e.key === "Escape") { setHelpOpen(false); setExportOpen(false); setSelection(null); if (!typing) setQuery(""); return; }
       if (typing) return;
+      if (proofread && mod && e.key === "Enter") { e.preventDefault(); checkAndNext(); return; }
+      if (proofread && e.key === "Tab" && !e.shiftKey) {
+        const t = e.target as HTMLElement;
+        const onControl = t.closest?.("button, a, input, select, textarea, [role=slider]");
+        if (!onControl) { e.preventDefault(); goToNextUnchecked(); return; }
+      }
       if (e.code === "Space") { e.preventDefault(); togglePlay(); }
       else if (e.key === "ArrowLeft") { e.preventDefault(); skip(-5); }
       else if (e.key === "ArrowRight") { e.preventDefault(); skip(5); }
@@ -522,6 +644,17 @@ export default function EditView({ filename, segments, videoUrl, downloads, save
           {saveState === "error" && "Save failed, try again"}
         </span>
         <div className="flex-1" />
+        <div role="tablist" aria-label="Mode" className="inline-flex p-[3px] gap-0.5 rounded-xl" style={{ backgroundColor: "var(--surface-raised)" }}>
+          {(["edit", "proofread"] as const).map((m) => (
+            <button key={m} role="tab" aria-selected={mode === m} onClick={() => setMode(m)}
+              className="h-8 px-3.5 rounded-[9px] text-[13px] font-medium"
+              style={mode === m
+                ? { backgroundColor: "var(--surface)", color: "var(--brand-dark)", boxShadow: "0 1px 2px rgba(30,20,40,.12)" }
+                : { color: "var(--text-secondary)" }}>
+              {m === "edit" ? "Edit" : "Proofread"}
+            </button>
+          ))}
+        </div>
         <button className={btn} style={btnStyle} onClick={() => setHelpOpen(true)} aria-label="Keyboard shortcuts">
           <Icon d={ICONS.keys} />
         </button>
@@ -553,7 +686,7 @@ export default function EditView({ filename, segments, videoUrl, downloads, save
       <div className="flex flex-col lg:flex-row gap-5 items-stretch lg:h-[calc(100vh-200px)] lg:min-h-[520px]">
 
         {/* Player column */}
-        <section aria-label="Player" className="lg:w-[46%] flex flex-col gap-3 min-w-0 shrink-0">
+        <section aria-label="Player" className={`flex flex-col gap-3 min-w-0 shrink-0 lg:overflow-y-auto ${proofread ? "lg:w-[340px] lg:order-2" : "lg:w-[46%]"}`}>
           <div ref={playerRef} className="relative rounded-2xl overflow-hidden bg-black flex items-center justify-center" style={{ aspectRatio: "16 / 9" }}>
             {videoUrl ? (
               <video
@@ -625,10 +758,58 @@ export default function EditView({ filename, segments, videoUrl, downloads, save
               <span className="absolute -top-1 -bottom-1 w-0.5" style={{ left: `${totalLength ? (time / totalLength) * 100 : 0}%`, backgroundColor: "var(--brand-dark)" }} />
             </div>
           </div>
+
+          {proofread && (
+            <>
+              <div className="rounded-[14px] px-4 py-3.5 flex flex-col gap-3" style={panel}>
+                <span className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--text-tertiary)" }}>Listening</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-[13px] flex-1" style={{ color: "var(--text-primary)" }}>Speed</span>
+                  <div className="inline-flex p-0.5 gap-0.5 rounded-[10px]" style={{ backgroundColor: "var(--surface-raised)" }}>
+                    {[0.75, 0.9, 1].map((r) => (
+                      <button key={r} onClick={() => setRateTo(r)} aria-pressed={rate === r}
+                        className="h-7 px-2.5 rounded-lg text-xs font-medium"
+                        style={rate === r ? { backgroundColor: "var(--surface)", color: "var(--brand-dark)" } : { color: "var(--text-secondary)" }}>{r}×</button>
+                    ))}
+                  </div>
+                </div>
+                <label className="flex items-center gap-2 text-[13px] cursor-pointer" style={{ color: "var(--text-primary)" }}>
+                  <input type="checkbox" checked={pauseOnEdit} onChange={(e) => setPauseOnEdit(e.target.checked)} />Pause while I edit
+                </label>
+                <label className="flex items-center gap-2 text-[13px] cursor-pointer" style={{ color: "var(--text-primary)" }}>
+                  <input type="checkbox" checked={rewindOnResume} onChange={(e) => setRewindOnResume(e.target.checked)} />Rewind 2 s when I press play
+                </label>
+              </div>
+              <div className="rounded-[14px] px-4 py-3.5 hidden lg:grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-xs items-center" style={{ ...panel, color: "var(--text-secondary)" }}>
+                <Kbd>Tab</Kbd><span>Next unchecked paragraph</span>
+                <Kbd>Ctrl Enter</Kbd><span>Mark checked and move on</span>
+                <Kbd>Ctrl Space</Kbd><span>Play / pause</span>
+                <Kbd>Ctrl J</Kbd><span>Replay the last 3 seconds</span>
+                <Kbd>Double-click</Kbd><span>Edit a sentence</span>
+              </div>
+            </>
+          )}
         </section>
 
         {/* Transcript column */}
-        <section aria-label="Transcript" className="flex-1 min-w-0 h-[75vh] lg:h-auto lg:min-h-0 rounded-2xl flex flex-col overflow-hidden" style={panel}>
+        <section aria-label="Transcript" className="flex-1 min-w-0 h-[75vh] lg:h-auto lg:min-h-0 lg:order-1 rounded-2xl flex flex-col overflow-hidden" style={panel}>
+          {proofread && (
+            <div className="flex flex-wrap items-center gap-x-5 gap-y-2 px-4 py-3" style={{ borderBottom: "1px solid var(--border)" }}>
+              <div className="flex-1 min-w-[220px] flex flex-col gap-1.5">
+                <div className="flex justify-between text-[13px]">
+                  <span className="font-semibold" style={{ color: "var(--text-primary)" }}>{checkedCount} of {paragraphs.length} paragraphs checked</span>
+                  <span style={{ color: "var(--text-tertiary)" }}>{paragraphs.length ? Math.round((checkedCount / paragraphs.length) * 100) : 0}%</span>
+                </div>
+                <div className="h-2 rounded-full overflow-hidden" style={{ backgroundColor: "var(--surface-raised)" }}>
+                  <div className="h-full rounded-full" style={{ width: `${paragraphs.length ? (checkedCount / paragraphs.length) * 100 : 0}%`, backgroundColor: "#1F9D5C" }} />
+                </div>
+              </div>
+              <button className={btn} onClick={() => goToNextUnchecked()}
+                style={{ backgroundColor: "var(--brand-dark)", color: "#fff", border: "1px solid var(--brand-dark)" }}>
+                Next unchecked <Kbd>Tab</Kbd>
+              </button>
+            </div>
+          )}
           <div className="flex flex-wrap items-center gap-2 px-3.5 py-3" style={{ borderBottom: "1px solid var(--border)" }}>
             <label className="flex-1 min-w-[200px] flex items-center gap-2 h-9 px-3 rounded-[10px]" style={{ border: "1px solid var(--border)", color: "var(--text-tertiary)" }}>
               <Icon d={ICONS.search} size={15} />
@@ -694,6 +875,9 @@ export default function EditView({ filename, segments, videoUrl, downloads, save
                 onSave={handleSave}
                 onSplit={handleSplit}
                 onCancel={handleCancel}
+                proofread={proofread}
+                checked={checkedFlags[pi]}
+                onToggleCheck={toggleCheck}
               />
             ))}
 
@@ -728,6 +912,27 @@ export default function EditView({ filename, segments, videoUrl, downloads, save
         </section>
       </div>
 
+      {fixOffer && (
+        <div role="status" className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 w-[min(560px,calc(100vw-32px))] rounded-2xl p-4 flex flex-col gap-3 text-white"
+          style={{ backgroundColor: "#2A2431", boxShadow: "0 16px 40px rgba(30,20,40,.3)" }}>
+          <span className="text-sm leading-relaxed">
+            You changed <span className="line-through opacity-70">{fixOffer.from}</span> to <span className="font-semibold">{fixOffer.to}</span>.
+            It appears <span className="font-semibold">{fixOffer.count} more {fixOffer.count === 1 ? "time" : "times"}</span> in this video.
+          </span>
+          <div className="flex flex-wrap gap-2">
+            <button onClick={fixTheOthers} className="h-9 px-4 rounded-[10px] text-[13px] font-semibold" style={{ backgroundColor: "#fff", color: "#2A2431" }}>
+              Fix all {fixOffer.count}
+            </button>
+            <button onClick={reviewTheOthers} className="h-9 px-4 rounded-[10px] text-[13px] font-medium" style={{ border: "1px solid #5B5566" }}>
+              Review one by one
+            </button>
+            <button onClick={() => setFixOffer(null)} className="h-9 px-3 rounded-[10px] text-[13px] font-medium opacity-80">
+              Just this one
+            </button>
+          </div>
+        </div>
+      )}
+
       {copied && (
         <div role="status" className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-xl text-sm text-white" style={{ backgroundColor: "#2A2431" }}>{copied}</div>
       )}
@@ -748,6 +953,9 @@ export default function EditView({ filename, segments, videoUrl, downloads, save
               <Kbd>Ctrl F</Kbd><span>Find in transcript (Enter for next)</span>
               <Kbd>Enter</Kbd><span>Save an edit</span>
               <Kbd>Alt Enter</Kbd><span>Split the sentence at the cursor</span>
+              <Kbd>Ctrl J</Kbd><span>Replay the last 3 seconds</span>
+              <Kbd>Tab</Kbd><span>Proofread: next unchecked paragraph</span>
+              <Kbd>Ctrl Enter</Kbd><span>Proofread: mark checked and move on</span>
               <Kbd>Esc</Kbd><span>Cancel / close</span>
             </div>
           </div>

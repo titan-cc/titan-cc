@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { timedWords, withNewText, wordRange, type Segment } from "./model";
+import { countWord, replaceWordEverywhere, singleWordFix, timedWords, withNewText, wordRange, type Segment } from "./model";
 
 function seg(text: string): Segment {
   const words = text.split(" ").map((w, i) => ({ word: " " + w, start: i, end: i + 0.8, prob: 0.4 }));
@@ -42,5 +42,25 @@ describe("wordRange", () => {
   it("finds the n-th word", () => {
     expect(wordRange("we met Antano today", 2)).toEqual([7, 13]);
     expect(wordRange("one", 3)).toBeNull();
+  });
+});
+
+
+describe("fix the others", () => {
+  it("offers names and terms, never everyday words", () => {
+    expect(singleWordFix("we met Anthano today.", "we met Antano today.")).toEqual({ from: "Anthano", to: "Antano" });
+    expect(singleWordFix("join BIG now", "join B!G now")).toEqual({ from: "BIG", to: "B!G" });
+    expect(singleWordFix("a big plan", "a B!G plan")).toBeNull();
+    expect(singleWordFix("one two", "one three four")).toBeNull();
+    expect(singleWordFix("Anthano and Harani", "Antano and Harini")).toBeNull();
+  });
+
+  it("replaces exact occurrences only, keeping punctuation and timings", () => {
+    const segs = [seg("Anthano said hi."), seg("thanks Anthano, see you"), seg("Anthanos is different")];
+    expect(countWord(segs, "Anthano")).toBe(2);
+    const out = replaceWordEverywhere(segs, "Anthano", "Antano");
+    expect(out.map((s) => s.text)).toEqual(["Antano said hi.", "thanks Antano, see you", "Anthanos is different"]);
+    expect(out[1].words?.[1]).toMatchObject({ word: " Antano,", start: 1 });
+    expect(out[2]).toBe(segs[2]);
   });
 });

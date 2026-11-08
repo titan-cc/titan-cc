@@ -131,6 +131,8 @@ class TranscriptSegmentUpdate(BaseModel):
     # 50 chars covers "Speaker 1" / "SPEAKER_00" style labels.
     speaker: Annotated[str | None, Field(max_length=50)] = None
     words: list[dict] | None = None
+    # Proofread mode: a person has checked this sentence.
+    checked: bool | None = None
 
 
 # 2-hour audio at ~3 words/sec ≈ 21 600 word-level segments; 30 000 is a safe ceiling.
