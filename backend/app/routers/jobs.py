@@ -21,6 +21,7 @@ from app.schemas import (
     TranscriptResponse,
     TranscriptUpdateRequest,
 )
+from app.services import captions
 from app.services import s3 as s3_service
 from app.services.quotas import check_concurrent, check_quota
 
@@ -278,14 +279,6 @@ async def get_transcript(
     return TranscriptResponse(downloads=downloads, video_url=video_url)
 
 
-def _srt_time(seconds: float) -> str:
-    h = int(seconds // 3600)
-    m = int((seconds % 3600) // 60)
-    s = int(seconds % 60)
-    ms = int((seconds % 1) * 1000)
-    return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
-
-
 def _build_json(segments: list[dict], job_id_str: str) -> bytes:
     return json.dumps(
         {"job_id": job_id_str, "segments": segments}, ensure_ascii=False, indent=2
@@ -293,13 +286,8 @@ def _build_json(segments: list[dict], job_id_str: str) -> bytes:
 
 
 def _build_srt(segments: list[dict]) -> bytes:
-    lines: list[str] = []
-    for i, seg in enumerate(segments, 1):
-        lines.append(str(i))
-        lines.append(f"{_srt_time(seg['start'])} --> {_srt_time(seg['end'])}")
-        lines.append(seg["text"])
-        lines.append("")
-    return "\n".join(lines).encode("utf-8")
+    # Short captions, same rules as the GPU worker, so an edit keeps the SRT readable.
+    return captions.build_srt(segments).encode("utf-8")
 
 
 def _build_txt(segments: list[dict]) -> bytes:
