@@ -12,6 +12,7 @@ import {
   speakerLabel,
   splitSegment,
   timedWords,
+  wordRange,
   UNSURE_BELOW,
   unsureWords,
   withNewText,
@@ -78,11 +79,14 @@ const isTyping = (el: EventTarget | null) =>
 
 function SegmentEditor({
   text,
+  select,
   onSave,
   onCancel,
   onSplit,
 }: {
   text: string;
+  /** Characters to select when it opens (the word that was double-clicked). */
+  select?: [number, number] | null;
   onSave: (text: string) => void;
   onCancel: () => void;
   onSplit: (before: string, after: string) => void;
@@ -94,7 +98,9 @@ function SegmentEditor({
     const el = ref.current;
     if (!el) return;
     el.focus();
-    el.setSelectionRange(el.value.length, el.value.length);
+    if (select) el.setSelectionRange(select[0], select[1]);
+    else el.setSelectionRange(el.value.length, el.value.length);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- select only once, when the editor opens
   }, []);
 
   function split() {
@@ -115,8 +121,8 @@ function SegmentEditor({
         onChange={(e) => setValue(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === "Escape") { e.preventDefault(); onCancel(); }
-          else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); onSave(value); }
           else if (e.key === "Enter" && e.altKey) { e.preventDefault(); split(); }
+          else if (e.key === "Enter") { e.preventDefault(); onSave(value); }
         }}
         rows={Math.max(2, Math.ceil(value.length / 70))}
         className="w-full rounded-lg px-3 py-2 text-[16px] leading-relaxed resize-none focus:outline-none"
@@ -134,7 +140,7 @@ function SegmentEditor({
           className="h-8 px-3 rounded-lg text-xs font-medium"
           style={{ color: "var(--text-secondary)" }}>Cancel</button>
         <span className="ml-auto text-[11px]" style={{ color: "var(--text-tertiary)" }}>
-          <Kbd>Ctrl Enter</Kbd> save · <Kbd>Alt Enter</Kbd> split · <Kbd>Esc</Kbd> cancel
+          <Kbd>Enter</Kbd> save · <Kbd>Alt Enter</Kbd> split · <Kbd>Esc</Kbd> cancel
         </span>
       </span>
     </span>
@@ -150,18 +156,20 @@ interface ParagraphProps {
   time: number | null;
   status: "past" | "active" | "future";
   editing: number | null;
+  /** Word to pre-select in the sentence being edited. */
+  editWord: number | null;
   query: string;
   speakerColour: string;
   showUnsure: boolean;
   onSeek: (t: number) => void;
-  onEdit: (seg: number) => void;
+  onEdit: (seg: number, word?: number) => void;
   onSave: (seg: number, text: string) => void;
   onSplit: (seg: number, before: string, after: string) => void;
   onCancel: () => void;
 }
 
 const ParagraphBlock = memo(function ParagraphBlock({
-  para, segments, time, status, editing, query, speakerColour, showUnsure,
+  para, segments, time, status, editing, editWord, query, speakerColour, showUnsure,
   onSeek, onEdit, onSave, onSplit, onCancel,
 }: ParagraphProps) {
   const re = findRegex(query);
@@ -171,7 +179,7 @@ const ParagraphBlock = memo(function ParagraphBlock({
     const seg = segments[si];
     if (editing === si) {
       items.push(
-        <SegmentEditor key={si} text={seg.text}
+        <SegmentEditor key={si} text={seg.text} select={editWord !== null ? wordRange(seg.text, editWord) : null}
           onSave={(t) => onSave(si, t)} onCancel={onCancel} onSplit={(a, b) => onSplit(si, a, b)} />,
       );
       continue;
@@ -199,6 +207,7 @@ const ParagraphBlock = memo(function ParagraphBlock({
               data-s={w.start}
               data-e={w.end}
               onClick={() => onSeek(w.start)}
+              onDoubleClick={(e) => { e.stopPropagation(); onEdit(si, wi); }}
               title={unsure ? `Unclear audio: ${Math.round((w.prob ?? 0) * 100)}% sure` : undefined}
               className="cursor-pointer rounded-[3px]"
               style={{
@@ -287,7 +296,7 @@ export default function EditView({ filename, segments, videoUrl, downloads, save
   const [rate, setRate] = useState(1);
   const [muted, setMuted] = useState(false);
   const [cc, setCc] = useState(true);
-  const [editing, setEditing] = useState<number | null>(null);
+  const [editing, setEditing] = useState<{ seg: number; word: number | null } | null>(null);
   const [query, setQuery] = useState("");
   const [replacement, setReplacement] = useState("");
   const [showReplace, setShowReplace] = useState(false);
@@ -391,9 +400,11 @@ export default function EditView({ filename, segments, videoUrl, downloads, save
     onChange([...segments.slice(0, si), a, b, ...segments.slice(si + 1)]);
   }, [segments, onChange]);
 
-  const handleEdit = useCallback((si: number) => {
+  const handleEdit = useCallback((si: number, word?: number) => {
     videoRef.current?.pause();
-    setEditing(si);
+    window.getSelection()?.removeAllRanges(); // drop the double-click word selection
+    setSelection(null);
+    setEditing({ seg: si, word: word ?? null });
   }, []);
   const handleCancel = useCallback(() => setEditing(null), []);
 
@@ -673,7 +684,8 @@ export default function EditView({ filename, segments, videoUrl, downloads, save
                 segments={segments}
                 time={pi === activePara ? time : null}
                 status={pi < activePara ? "past" : pi === activePara ? "active" : "future"}
-                editing={editing !== null && editing >= p.first && editing <= p.last ? editing : null}
+                editing={editing !== null && editing.seg >= p.first && editing.seg <= p.last ? editing.seg : null}
+                editWord={editing !== null && editing.seg >= p.first && editing.seg <= p.last ? editing.word : null}
                 query={query}
                 speakerColour={SPEAKER_COLOURS[Math.max(0, speakers.indexOf(p.speaker ?? "")) % SPEAKER_COLOURS.length]}
                 showUnsure={showUnsure}
@@ -703,7 +715,7 @@ export default function EditView({ filename, segments, videoUrl, downloads, save
           </div>
 
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 px-4 py-2.5 text-xs" style={{ borderTop: "1px solid var(--border)", color: "var(--text-tertiary)" }}>
-            <span>Click a word to jump · double-click to edit</span>
+            <span>Click a word to jump · double-click to edit its sentence</span>
             <span><Kbd>Ctrl Space</Kbd> play / pause</span>
             <span><Kbd>?</Kbd> all shortcuts</span>
             {allUnsure.length > 0 && (
@@ -734,7 +746,7 @@ export default function EditView({ filename, segments, videoUrl, downloads, save
               <Kbd>E</Kbd><span>Edit the sentence that is playing</span>
               <Kbd>N</Kbd><span>Next word to check</span>
               <Kbd>Ctrl F</Kbd><span>Find in transcript (Enter for next)</span>
-              <Kbd>Ctrl Enter</Kbd><span>Save an edit</span>
+              <Kbd>Enter</Kbd><span>Save an edit</span>
               <Kbd>Alt Enter</Kbd><span>Split the sentence at the cursor</span>
               <Kbd>Esc</Kbd><span>Cancel / close</span>
             </div>

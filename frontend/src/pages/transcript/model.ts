@@ -58,21 +58,58 @@ export function timedWords(seg: Segment): Word[] | null {
 }
 
 /**
- * New text for a segment. When the word count is unchanged (a spelling fix),
- * the old timings carry over and changed words count as checked. Otherwise the
- * word timings are dropped and the segment plays as one block.
+ * New text for a segment, keeping word timings so the highlight still works.
+ * Same word count (spelling fixes): each word keeps its slot. Otherwise the
+ * unchanged words at the start and end keep their timings, and the edited
+ * middle shares the time of the words it replaced. Edited words count as checked.
  */
 export function withNewText(seg: Segment, text: string): Segment {
   const tokens = norm(text).split(" ").filter(Boolean);
   const old = timedWords(seg);
-  if (old && old.length === tokens.length) {
+  const clean = tokens.join(" ");
+  if (!old || !tokens.length) return { ...seg, text: clean, words: null };
+
+  if (old.length === tokens.length) {
     const words = old.map((w, i) => {
       const changed = w.word.trim() !== tokens[i];
       return { ...w, word: " " + tokens[i], prob: changed ? 1 : w.prob };
     });
-    return { ...seg, text: tokens.join(" "), words };
+    return { ...seg, text: clean, words };
   }
-  return { ...seg, text: tokens.join(" "), words: null };
+
+  let pre = 0;
+  while (pre < old.length && pre < tokens.length && old[pre].word.trim() === tokens[pre]) pre++;
+  let suf = 0;
+  while (
+    suf < old.length - pre && suf < tokens.length - pre &&
+    old[old.length - 1 - suf].word.trim() === tokens[tokens.length - 1 - suf]
+  ) suf++;
+
+  const oldMid = old.slice(pre, old.length - suf);
+  const newMid = tokens.slice(pre, tokens.length - suf);
+  // Time available to the edited words: what the replaced words used, or the gap they sit in.
+  const from = oldMid.length ? oldMid[0].start : pre > 0 ? old[pre - 1].end : seg.start;
+  const to = oldMid.length ? oldMid[oldMid.length - 1].end : suf > 0 ? old[old.length - suf].start : seg.end;
+  const step = newMid.length ? Math.max(to - from, 0) / newMid.length : 0;
+  const mid = newMid.map((t, i) => ({
+    word: " " + t,
+    start: +(from + step * i).toFixed(3),
+    end: +(from + step * (i + 1)).toFixed(3),
+    prob: 1,
+  }));
+  const words = [...old.slice(0, pre), ...mid, ...old.slice(old.length - suf)];
+  return { ...seg, text: clean, words };
+}
+
+/** Character range of the n-th word in a text, for selecting it in the editor. */
+export function wordRange(text: string, n: number): [number, number] | null {
+  const re = /\S+/g;
+  let m: RegExpExecArray | null;
+  let i = 0;
+  while ((m = re.exec(text))) {
+    if (i++ === n) return [m.index, m.index + m[0].length];
+  }
+  return null;
 }
 
 /** Split a segment at a character position, keeping word timings where possible. */
