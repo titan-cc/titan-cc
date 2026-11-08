@@ -292,7 +292,7 @@ export default function EditView({ filename, segments, videoUrl, downloads, save
   const [replacement, setReplacement] = useState("");
   const [showReplace, setShowReplace] = useState(false);
   const [matchIdx, setMatchIdx] = useState(0);
-  const [showUnsure, setShowUnsure] = useState(true);
+  const [showUnsure, setShowUnsure] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
@@ -300,7 +300,9 @@ export default function EditView({ filename, segments, videoUrl, downloads, save
 
   const paragraphs = useMemo(() => buildParagraphs(segments), [segments]);
   const captions = useMemo(() => buildCaptions(segments), [segments]);
-  const unsure = useMemo(() => unsureWords(segments), [segments]);
+  const allUnsure = useMemo(() => unsureWords(segments), [segments]);
+  // Off by default: Whisper confidence alone flags many correct words (phase 1 feedback).
+  const unsure = showUnsure ? allUnsure : [];
   const matches = useMemo(() => findMatches(segments, query), [segments, query]);
   const speakers = useMemo(() => [...new Set(segments.map((s) => s.speaker).filter(Boolean))] as string[], [segments]);
   const wordCount = useMemo(() => segments.reduce((n, s) => n + s.text.split(/\s+/).filter(Boolean).length, 0), [segments]);
@@ -704,9 +706,9 @@ export default function EditView({ filename, segments, videoUrl, downloads, save
             <span>Click a word to jump · double-click to edit</span>
             <span><Kbd>Ctrl Space</Kbd> play / pause</span>
             <span><Kbd>?</Kbd> all shortcuts</span>
-            {unsure.length > 0 && (
+            {allUnsure.length > 0 && (
               <label className="inline-flex items-center gap-1.5 cursor-pointer">
-                <input type="checkbox" checked={showUnsure} onChange={(e) => setShowUnsure(e.target.checked)} />Underline words to check
+                <input type="checkbox" checked={showUnsure} onChange={(e) => setShowUnsure(e.target.checked)} />Show words Whisper was unsure about
               </label>
             )}
             <span className="ml-auto tabular-nums">{wordCount.toLocaleString()} words</span>
