@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- Small-size Signal T: stem plus one bar each side, on the dark plum square. -->
+  <rect width="32" height="32" rx="7" fill="#1A0315"/>
+  <g fill="#EC008C">
+    <rect x="13" y="5" width="6" height="22" rx="3"/>
+    <rect x="6" y="8" width="5" height="9" rx="2.5"/>
+    <rect x="21" y="8" width="5" height="9" rx="2.5"/>
+  </g>
+</svg>

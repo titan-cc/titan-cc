@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- App icon: Signal T at 64% on the dark plum square (full bleed, so it also works as a maskable icon). -->
+  <rect width="512" height="512" fill="#1A0315"/>
+  <g transform="translate(96 96) scale(3.2)" fill="#EC008C">
+    <rect x="44" y="12" width="12" height="76" rx="6"/>
+    <rect x="32" y="18" width="8" height="24" rx="4"/>
+    <rect x="60" y="18" width="8" height="24" rx="4"/>
+    <rect x="20" y="22" width="8" height="16" rx="4"/>
+    <rect x="72" y="22" width="8" height="16" rx="4"/>
+    <rect x="8" y="25" width="8" height="10" rx="4"/>
+    <rect x="84" y="25" width="8" height="10" rx="4"/>
+  </g>
+</svg>

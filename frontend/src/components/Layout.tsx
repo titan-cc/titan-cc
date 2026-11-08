@@ -92,9 +92,18 @@ function CloseIcon() {
 
 function Brand() {
   return (
-    <div className="flex items-center gap-1.5 select-none">
-      <span className="h-4 w-[3px] rounded-full" style={{ backgroundColor: "var(--brand)" }} />
-      <span className="text-[13px] text-white" style={{ fontWeight: 800, letterSpacing: "-0.01em" }}>
+    <div className="flex items-center gap-2 select-none">
+      {/* Signal T: a T drawn from a sound wave (same shapes as /titan-mark.svg). */}
+      <svg width="22" height="22" viewBox="0 0 100 100" aria-hidden="true" fill="var(--brand)">
+        <rect x="44" y="12" width="12" height="76" rx="6" />
+        <rect x="32" y="18" width="8" height="24" rx="4" />
+        <rect x="60" y="18" width="8" height="24" rx="4" />
+        <rect x="20" y="22" width="8" height="16" rx="4" />
+        <rect x="72" y="22" width="8" height="16" rx="4" />
+        <rect x="8" y="25" width="8" height="10" rx="4" />
+        <rect x="84" y="25" width="8" height="10" rx="4" />
+      </svg>
+      <span className="text-[15px] text-white" style={{ fontWeight: 800, letterSpacing: "-0.01em" }}>
         Titan<span style={{ color: "var(--brand)" }}>CC</span>
       </span>
     </div>
