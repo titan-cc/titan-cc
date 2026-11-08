@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { acceptSuggestion, countWord, dismissSuggestion, replaceWordEverywhere, singleWordFix, timedWords, undoAutoFixes, withNewText, wordListMarks, wordRange, type Segment } from "./model";
+import { acceptSuggestion, countWord, dismissSuggestion, findMatches, replaceAll, replaceWordEverywhere, singleWordFix, timedWords, undoAutoFixes, withNewText, wordListMarks, wordRange, type Segment } from "./model";
 
 function seg(text: string): Segment {
   const words = text.split(" ").map((w, i) => ({ word: " " + w, start: i, end: i + 0.8, prob: 0.4 }));
@@ -95,5 +95,21 @@ describe("word list marks", () => {
     const edited = withNewText(marked(), "join Antano, BIG cohort");
     expect(edited.words?.[2]).toEqual({ word: " BIG", start: 2, end: 2.5, prob: 1 });
     expect(edited.words?.[1].auto_from).toBe("Anthano,");
+  });
+});
+
+
+describe("find and replace", () => {
+  const segs = (...t: string[]) => t.map((x) => seg(x));
+  it("matches whole words only", () => {
+    const s = segs("his peer group, I gave up. Up next", "upon the setup up");
+    expect(findMatches(s, "up").length).toBe(3);
+    expect(findMatches(s, "first lever").length).toBe(0);
+    expect(findMatches(segs("the first lever is"), "first lever").length).toBe(1);
+    expect(findMatches(segs("join B!G now", "B!Gs"), "B!G").length).toBe(1);
+  });
+  it("replaces whole words only", () => {
+    const out = replaceAll(segs("group up, Up"), "up", "down");
+    expect(out[0].text).toBe("group down, down");
   });
 });

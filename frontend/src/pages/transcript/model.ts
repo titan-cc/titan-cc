@@ -273,9 +273,14 @@ export function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+/**
+ * Whole-word search: "up" finds "up" and "Up," but not "group" or "upon".
+ * Works for phrases ("first lever") and names with symbols ("B!G").
+ */
 export function findRegex(query: string): RegExp | null {
   const q = query.trim();
-  return q ? new RegExp(escapeRegex(q), "gi") : null;
+  // A match must not have a letter or digit directly before or after it.
+  return q ? new RegExp("(?<![\\p{L}\\p{N}])" + escapeRegex(q) + "(?![\\p{L}\\p{N}])", "giu") : null;
 }
 
 export interface Match {

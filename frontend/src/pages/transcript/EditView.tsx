@@ -204,7 +204,7 @@ const ParagraphBlock = memo(function ParagraphBlock({
 
     if (re) {
       // Find mode: plain text with matches marked.
-      const parts = seg.text.split(new RegExp(`(${re.source})`, "gi"));
+      const parts = seg.text.split(new RegExp(`(${re.source})`, re.flags));
       body = parts.map((p, i) =>
         i % 2 === 1 ? <mark key={i} className="rounded px-0.5" style={{ backgroundColor: "#FDE68A", color: "inherit" }}>{p}</mark> : <span key={i}>{p}</span>,
       );
