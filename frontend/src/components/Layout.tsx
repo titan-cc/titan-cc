@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { apiFetch } from "@/api/client";
 import type { Notification, NotificationListResponse, UserMeResponse } from "@/api/types";
+import BillingAlertBanner from "./BillingAlerts";
 
 // ── Icons ─────────────────────────────────────────────────────────────────────
 
@@ -503,6 +504,7 @@ export default function Layout({ children }: { children: ReactNode }) {
       {/* ── Main content ── */}
       <main className="flex-1 md:ml-56 pt-12 md:pt-0 min-w-0">
         <div className="max-w-6xl mx-auto px-4 sm:px-8 py-8 sm:py-10">
+          <BillingAlertBanner isAdmin={me?.role === "admin"} />
           {children}
         </div>
       </main>

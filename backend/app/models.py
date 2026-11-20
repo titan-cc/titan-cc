@@ -285,3 +285,20 @@ class VocabularyTerm(Base):
     updated_at: Mapped[datetime] = mapped_column(
         TIMESTAMPTZ, nullable=False, server_default=func.now(), onupdate=func.now()
     )
+
+
+class BillingAcknowledgement(Base):
+    """An admin marked a bill as paid (AWS's API can't tell Titan whether an invoice is paid)."""
+
+    __tablename__ = "billing_acknowledgements"
+    __table_args__ = (Index("uq_billing_ack_provider_invoice", "provider", "invoice_id", unique=True),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    provider: Mapped[str] = mapped_column(Text, nullable=False)
+    invoice_id: Mapped[str] = mapped_column(Text, nullable=False)
+    acknowledged_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    acknowledged_at: Mapped[datetime] = mapped_column(
+        TIMESTAMPTZ, nullable=False, server_default=func.now()
+    )

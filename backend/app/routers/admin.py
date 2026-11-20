@@ -3,13 +3,14 @@ import os
 import time
 import uuid
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Annotated, Any, Literal
 
 import boto3
 import httpx
 import structlog
 from botocore.exceptions import ClientError
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -17,7 +18,7 @@ from sqlalchemy.orm import selectinload
 from app.config import settings
 from app.db import get_db
 from app.deps import require_admin
-from app.models import Job, Quota, User, UserActivityLog
+from app.models import BillingAcknowledgement, Job, Quota, User, UserActivityLog
 from app.schemas import (
     ActivityLogEntry,
     ActivityLogResponse,
@@ -32,6 +33,7 @@ from app.schemas import (
     QuotaResponse,
     UpdateUserRequest,
 )
+from app.services import billing_alerts
 from app.services.activity import log_activity
 
 logger = structlog.get_logger()
@@ -553,6 +555,62 @@ async def get_billing(
     )
     _billing_cache[cache_key] = (time.monotonic(), result)
     return result
+
+
+# ── Billing alerts (banner for admins) ────────────────────────────────────────
+
+class BillingAlert(BaseModel):
+    id: str
+    provider: str
+    level: str  # "red" | "amber"
+    title: str
+    message: str
+    action_label: str | None = None
+    action_url: str | None = None
+    banner: bool = True  # False: shown on the Billing page only
+    invoice_id: str | None = None  # set when "Mark as paid" applies
+
+
+class MarkPaidRequest(BaseModel):
+    provider: Literal["aws"]
+    invoice_id: Annotated[str, Field(min_length=1, max_length=100)]
+
+
+@router.get("/billing/alerts", response_model=list[BillingAlert])
+async def get_billing_alerts(
+    refresh: bool = False,
+    _: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> Any:
+    cache_key = "billing_alerts"
+    if not refresh and cache_key in _billing_cache:
+        fetched_at, cached = _billing_cache[cache_key]
+        if time.monotonic() - fetched_at < _BILLING_TTL:
+            return cached
+    paid = set((await db.execute(
+        select(BillingAcknowledgement.invoice_id).where(BillingAcknowledgement.provider == "aws")
+    )).scalars().all())
+    result = await billing_alerts.all_alerts(paid)
+    _billing_cache[cache_key] = (time.monotonic(), result)
+    return result
+
+
+@router.post("/billing/mark-paid", status_code=status.HTTP_204_NO_CONTENT)
+async def mark_bill_paid(
+    body: MarkPaidRequest,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    exists = (await db.execute(
+        select(BillingAcknowledgement).where(
+            BillingAcknowledgement.provider == body.provider,
+            BillingAcknowledgement.invoice_id == body.invoice_id,
+        )
+    )).scalar_one_or_none()
+    if exists is None:
+        db.add(BillingAcknowledgement(provider=body.provider, invoice_id=body.invoice_id, acknowledged_by=admin.id))
+        await db.commit()
+    _billing_cache.pop("billing_alerts", None)  # the banner disappears straight away
 
 
 @router.get("/jobs", response_model=AdminJobListResponse)

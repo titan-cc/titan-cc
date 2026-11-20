@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { useAuth } from "@clerk/clerk-react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/api/client";
 import type { BillingResponse, ProviderBilling } from "@/api/types";
+import { AlertCards, useBillingAlerts } from "@/components/BillingAlerts";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -167,6 +168,21 @@ export default function AdminBilling() {
     staleTime: 270_000, // 4.5 min — just under the server-side 5-min cache
   });
 
+  // Banner alerts already show at the top of every page; here add the setup notices
+  // (e.g. a key Titan can't use) that would otherwise hide a missing warning.
+  const queryClient = useQueryClient();
+  const { data: alerts } = useBillingAlerts(true);
+  const setupNotices = (alerts ?? []).filter((a) => !a.banner);
+
+  async function refreshAll() {
+    setRefreshKey((k) => k + 1);
+    try {
+      const token = await getToken();
+      const res = await apiFetch("/admin/billing/alerts?refresh=true", { token: token! });
+      queryClient.setQueryData(["billing-alerts"], await res.json());
+    } catch { /* the cards show their own errors */ }
+  }
+
   const bothResolved =
     data != null && !data.railway.error && !data.aws.error;
 
@@ -188,7 +204,7 @@ export default function AdminBilling() {
         </div>
 
         <button
-          onClick={() => setRefreshKey((k) => k + 1)}
+          onClick={refreshAll}
           disabled={isFetching}
           className="flex items-center gap-1.5 text-[12px] font-medium px-3 py-1.5 rounded-xl transition-ui disabled:opacity-50"
           style={{ backgroundColor: "rgba(255,255,255,0.06)", color: "var(--text-secondary)", border: "1px solid var(--border)" }}
@@ -199,6 +215,8 @@ export default function AdminBilling() {
           {isFetching ? "Refreshing…" : "Refresh"}
         </button>
       </div>
+
+      {setupNotices.length > 0 && <AlertCards alerts={setupNotices} dismissible={false} />}
 
       {/* Summary bar (Railway + AWS spend only) */}
       {monthlySpend !== null && monthlySpend > 0 && (
