@@ -117,7 +117,7 @@ def _merge_orphans(captions: list[dict]) -> list[dict]:
             prev is not None
             and " " not in cap["text"]
             and not prev["text"].endswith(_SENTENCE_END)
-            and len(prev["text"]) + 1 + len(cap["text"]) <= MAX_CAPTION_CHARS + 8
+            and len(prev["text"]) + 1 + len(cap["text"]) <= MAX_CAPTION_CHARS  # strictly one line
             and cap["start"] - prev["end"] < PAUSE_SPLIT_SECONDS
         ):
             prev["text"] = f'{prev["text"]} {cap["text"]}'
@@ -135,8 +135,14 @@ def srt_time(seconds: float) -> str:
     return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
 
 
-def build_srt(segments: list[dict]) -> str:
+def srt_from_captions(caps: list[dict]) -> str:
+    """SRT from ready-made captions (Captions mode), one line each."""
     lines: list[str] = []
-    for i, cap in enumerate(split_into_captions(segments), 1):
-        lines += [str(i), f"{srt_time(cap['start'])} --> {srt_time(cap['end'])}", cap["text"], ""]
+    for i, cap in enumerate(caps, 1):
+        text = " ".join(str(cap["text"]).split())  # never more than one line
+        lines += [str(i), f"{srt_time(cap['start'])} --> {srt_time(cap['end'])}", text, ""]
     return "\n".join(lines)
+
+
+def build_srt(segments: list[dict]) -> str:
+    return srt_from_captions(split_into_captions(segments))

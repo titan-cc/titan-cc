@@ -279,14 +279,26 @@ async def get_transcript(
     return TranscriptResponse(downloads=downloads, video_url=video_url)
 
 
-def _build_json(segments: list[dict], job_id_str: str) -> bytes:
-    return json.dumps(
-        {"job_id": job_id_str, "segments": segments}, ensure_ascii=False, indent=2
-    ).encode("utf-8")
+def _build_json(
+    segments: list[dict],
+    job_id_str: str,
+    caption_breaks: list[float] | None = None,
+    caption_settings: dict | None = None,
+) -> bytes:
+    doc: dict = {"job_id": job_id_str, "segments": segments}
+    # Captions mode keeps its cut with the transcript so it survives reloads.
+    if caption_breaks is not None:
+        doc["caption_breaks"] = caption_breaks
+    if caption_settings is not None:
+        doc["caption_settings"] = caption_settings
+    return json.dumps(doc, ensure_ascii=False, indent=2).encode("utf-8")
 
 
-def _build_srt(segments: list[dict]) -> bytes:
-    # Short captions, same rules as the GPU worker, so an edit keeps the SRT readable.
+def _build_srt(segments: list[dict], shown: list[dict] | None = None) -> bytes:
+    # Captions mode sends the captions exactly as shown; otherwise use Titan's
+    # standard single-line cut (same rules as the GPU worker).
+    if shown:
+        return captions.srt_from_captions(shown).encode("utf-8")
     return captions.build_srt(segments).encode("utf-8")
 
 
@@ -312,9 +324,12 @@ async def update_transcript(
     segs = [s.model_dump(exclude_none=False) for s in body.segments]
     job_id_str = str(job_id)
 
+    shown = [c.model_dump() for c in body.captions] if body.captions else None
+    settings_doc = body.caption_settings.model_dump() if body.caption_settings else None
+
     format_bytes: dict[str, tuple[bytes, str]] = {
-        "json": (_build_json(segs, job_id_str), "application/json"),
-        "srt":  (_build_srt(segs), "text/plain; charset=utf-8"),
+        "json": (_build_json(segs, job_id_str, body.caption_breaks, settings_doc), "application/json"),
+        "srt":  (_build_srt(segs, shown), "text/plain; charset=utf-8"),
         "txt":  (_build_txt(segs), "text/plain; charset=utf-8"),
     }
 

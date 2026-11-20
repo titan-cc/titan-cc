@@ -21,7 +21,7 @@ def test_uses_word_timings_when_words_match():
     caps = split_into_captions([seg])
     assert len(caps) > 2
     assert caps[0]["start"] == seg["words"][0]["start"]
-    assert all(len(c["text"]) <= MAX_CAPTION_CHARS + 8 for c in caps)
+    assert all(len(c["text"]) <= MAX_CAPTION_CHARS for c in caps)
 
 
 def test_edited_text_wins_over_stale_words():
@@ -55,3 +55,22 @@ def test_segment_update_keeps_checked_flag():
     seg = TranscriptSegmentUpdate(start=0, end=1, text="Hi.", checked=True)
     assert seg.model_dump()["checked"] is True
     assert TranscriptSegmentUpdate(start=0, end=1, text="Hi.").model_dump()["checked"] is None
+
+
+def test_captions_mode_srt_and_json():
+    import json
+
+    from app.routers.jobs import _build_json, _build_srt
+
+    shown = [
+        {"start": 1.0, "end": 2.5, "text": "OK, I'm going to give you"},
+        {"start": 2.5, "end": 4.0, "text": "a very quick intro"},
+    ]
+    srt = _build_srt([], shown).decode()
+    assert srt.startswith("1\n00:00:01,000 --> 00:00:02,500\nOK, I'm going to give you\n")
+    assert "2\n00:00:02,500 --> 00:00:04,000\na very quick intro" in srt
+
+    doc = json.loads(_build_json([], "job-1", [1.0, 2.5], {"by": "words", "value": 4, "manual": 1}))
+    assert doc["caption_breaks"] == [1.0, 2.5]
+    assert doc["caption_settings"]["value"] == 4
+    assert "caption_breaks" not in json.loads(_build_json([], "job-1"))

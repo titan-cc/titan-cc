@@ -6,10 +6,20 @@ import { apiFetch } from "@/api/client";
 import type { Job, TranscriptResponse } from "@/api/types";
 import EditView from "./transcript/EditView";
 import type { Segment } from "./transcript/model";
+import { buildCaptionList, DEFAULT_SETTINGS, forSaving, type CaptionSettings } from "./transcript/captions";
 
 interface TranscriptContent {
   job_id: string;
   segments: Segment[];
+  /** Captions mode: hand-made breaks (null = automatic cut) and the length setting. */
+  caption_breaks?: number[] | null;
+  caption_settings?: CaptionSettings | null;
+}
+
+interface SavePayload {
+  segments: Segment[];
+  breaks: number[] | null;
+  settings: CaptionSettings | null;
 }
 
 function Skeleton() {
@@ -41,6 +51,8 @@ export default function TranscriptViewer() {
   const { getToken } = useAuth();
   const queryClient = useQueryClient();
   const [localSegments, setLocalSegments] = useState<Segment[]>([]);
+  const [captionBreaks, setCaptionBreaks] = useState<number[] | null>(null);
+  const [captionSettings, setCaptionSettings] = useState<CaptionSettings | null>(null);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const savedTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
@@ -80,16 +92,26 @@ export default function TranscriptViewer() {
   });
 
   useEffect(() => {
-    if (content?.segments) setLocalSegments(content.segments);
+    if (!content?.segments) return;
+    setLocalSegments(content.segments);
+    setCaptionBreaks(content.caption_breaks ?? null);
+    setCaptionSettings(content.caption_settings ?? null);
   }, [content]);
 
   const saveMutation = useMutation({
-    mutationFn: async (segments: Segment[]) => {
+    mutationFn: async ({ segments, breaks, settings }: SavePayload) => {
       const token = await getToken();
+      // The SRT is written from exactly the captions Captions mode shows.
+      const captions = forSaving(buildCaptionList(segments, breaks, settings ?? DEFAULT_SETTINGS));
       const res = await apiFetch(`/jobs/${id}/transcript`, {
         token: token!,
         method: "PUT",
-        body: JSON.stringify({ segments }),
+        body: JSON.stringify({
+          segments,
+          captions,
+          caption_breaks: breaks,
+          caption_settings: settings,
+        }),
       });
       return res.json() as Promise<TranscriptResponse>;
     },
@@ -97,12 +119,17 @@ export default function TranscriptViewer() {
       clearTimeout(savedTimer.current);
       setSaveState("saving");
     },
-    onSuccess: (updatedMeta, savedSegments) => {
+    onSuccess: (updatedMeta, saved) => {
       queryClient.setQueryData(["transcript", id], updatedMeta);
       // Seed the new content cache key so the viewer never drops into a loading state after a save.
       const newJsonUrl = updatedMeta.downloads?.json?.url;
       if (newJsonUrl) {
-        queryClient.setQueryData<TranscriptContent>(["transcript-content", newJsonUrl], { job_id: id!, segments: savedSegments });
+        queryClient.setQueryData<TranscriptContent>(["transcript-content", newJsonUrl], {
+          job_id: id!,
+          segments: saved.segments,
+          caption_breaks: saved.breaks,
+          caption_settings: saved.settings,
+        });
       }
       setSaveState("saved");
       savedTimer.current = setTimeout(() => setSaveState("idle"), 2500);
@@ -127,7 +154,14 @@ export default function TranscriptViewer() {
 
   function handleChange(segments: Segment[]) {
     setLocalSegments(segments);
-    saveMutation.mutate(segments);
+    saveMutation.mutate({ segments, breaks: captionBreaks, settings: captionSettings });
+  }
+
+  function handleCaptionsChange(segments: Segment[], breaks: number[] | null, settings: CaptionSettings) {
+    setLocalSegments(segments);
+    setCaptionBreaks(breaks);
+    setCaptionSettings(settings);
+    saveMutation.mutate({ segments, breaks, settings });
   }
 
   // Only block on the very first load, never during post-save refetches.
@@ -153,6 +187,9 @@ export default function TranscriptViewer() {
       saveState={saveState}
       onChange={handleChange}
       onRemember={handleRemember}
+      captionBreaks={captionBreaks}
+      captionSettings={captionSettings}
+      onCaptionsChange={handleCaptionsChange}
       backLink={BackLink}
     />
   );

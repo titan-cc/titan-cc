@@ -213,60 +213,6 @@ export function unsureWords(segments: Segment[]): UnsureWord[] {
   return out;
 }
 
-// ── Short captions (same rules as the worker and backend) ─────────────────────
-
-const MAX_CHARS = 42;
-const MAX_SECONDS = 5;
-const PAUSE = 0.5;
-
-export interface Caption {
-  start: number;
-  end: number;
-  text: string;
-}
-
-export function buildCaptions(segments: Segment[]): Caption[] {
-  const caps: Caption[] = [];
-  for (const seg of segments) {
-    const words = timedWords(seg);
-    if (!words) {
-      caps.push({ start: seg.start, end: seg.end, text: seg.text });
-      continue;
-    }
-    let cur: Word[] = [];
-    const text = (ws: Word[]) => ws.map((w) => w.word).join("").trim();
-    const flush = () => {
-      if (cur.length) caps.push({ start: cur[0].start, end: cur[cur.length - 1].end, text: text(cur) });
-      cur = [];
-    };
-    for (const w of words) {
-      if (cur.length) {
-        const tooLong = text([...cur, w]).length > MAX_CHARS;
-        const tooSlow = w.end - cur[0].start > MAX_SECONDS;
-        const paused = w.start - cur[cur.length - 1].end >= PAUSE;
-        if (tooLong || tooSlow || paused) flush();
-      }
-      cur.push(w);
-      const tok = w.word.trim();
-      if (/[.?!]$/.test(tok) || (/[,;:]$/.test(tok) && text(cur).length >= 15)) flush();
-    }
-    flush();
-  }
-  return caps;
-}
-
-export function captionAt(caps: Caption[], t: number): Caption | null {
-  let lo = 0;
-  let hi = caps.length - 1;
-  while (lo <= hi) {
-    const mid = (lo + hi) >> 1;
-    if (caps[mid].end < t) lo = mid + 1;
-    else if (caps[mid].start > t) hi = mid - 1;
-    else return caps[mid];
-  }
-  return null;
-}
-
 // ── Find & replace ────────────────────────────────────────────────────────────
 
 export function escapeRegex(s: string): string {

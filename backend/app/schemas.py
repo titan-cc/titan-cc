@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -139,8 +139,26 @@ class TranscriptSegmentUpdate(BaseModel):
 _MAX_SEGMENTS = 30_000
 
 
+class CaptionUpdate(BaseModel):
+    start: float
+    end: float
+    # One line of subtitle text; generous ceiling so a hand merge is never rejected.
+    text: Annotated[str, Field(max_length=500)]
+
+
+class CaptionSettings(BaseModel):
+    by: Literal["chars", "words"] = "chars"
+    value: Annotated[int, Field(ge=1, le=200)] = 42
+    manual: Annotated[int, Field(ge=0)] = 0
+
+
 class TranscriptUpdateRequest(BaseModel):
     segments: Annotated[list[TranscriptSegmentUpdate], Field(max_length=_MAX_SEGMENTS)]
+    # Captions mode: the captions as shown (the SRT is written from these), plus
+    # the break times and settings that produced them, kept in the transcript JSON.
+    captions: Annotated[list[CaptionUpdate], Field(max_length=_MAX_SEGMENTS * 4)] | None = None
+    caption_breaks: Annotated[list[float], Field(max_length=_MAX_SEGMENTS * 4)] | None = None
+    caption_settings: CaptionSettings | None = None
 
 
 # ── Notifications ──────────────────────────────────────────────────────────────

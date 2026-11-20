@@ -24,7 +24,7 @@ def test_captions_respect_length_and_duration():
     caps = split_into_captions([_segment(LONG)])
     assert len(caps) > 3
     for c in caps:
-        assert len(c["text"]) <= MAX_CAPTION_CHARS + 8  # +8 only for a merged orphan word
+        assert len(c["text"]) <= MAX_CAPTION_CHARS  # strictly one line
         assert c["end"] - c["start"] <= MAX_CAPTION_SECONDS + 0.5
 
 

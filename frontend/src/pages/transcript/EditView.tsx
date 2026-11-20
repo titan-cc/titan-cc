@@ -1,9 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   acceptSuggestion,
-  buildCaptions,
   buildParagraphs,
-  captionAt,
   countWord,
   dismissSuggestion,
   findMatches,
@@ -28,6 +26,18 @@ import {
   type Paragraph,
   type Segment,
 } from "./model";
+import {
+  buildCaptionList,
+  captionAt,
+  currentBreaks,
+  DEFAULT_SETTINGS,
+  fixWord,
+  mergeWithNext,
+  splitAt,
+  toSrt,
+  type CaptionSettings,
+} from "./captions";
+import CaptionsPanel from "./CaptionsPanel";
 
 // ── Small pieces ──────────────────────────────────────────────────────────────
 
@@ -317,6 +327,8 @@ const ParagraphBlock = memo(function ParagraphBlock({
 
 // ── The Edit view ─────────────────────────────────────────────────────────────
 
+type Mode = "edit" | "proofread" | "captions";
+
 export interface EditViewProps {
   filename: string;
   segments: Segment[];
@@ -327,6 +339,10 @@ export interface EditViewProps {
   backLink: React.ReactNode;
   /** Add a corrected spelling to the team word list. Resolves true when saved. */
   onRemember?: (term: string, heardAs: string) => Promise<boolean>;
+  /** Captions mode: hand-made caption breaks (null = Titan's automatic cut) and settings. */
+  captionBreaks?: number[] | null;
+  captionSettings?: CaptionSettings | null;
+  onCaptionsChange?: (segments: Segment[], breaks: number[] | null, settings: CaptionSettings) => void;
 }
 
 const EXPORT_LABELS: Record<string, [string, string]> = {
@@ -335,7 +351,10 @@ const EXPORT_LABELS: Record<string, [string, string]> = {
   json: ["JSON with word timings", ".json"],
 };
 
-export default function EditView({ filename, segments, videoUrl, downloads, saveState, onChange, backLink, onRemember }: EditViewProps) {
+export default function EditView({
+  filename, segments, videoUrl, downloads, saveState, onChange, backLink, onRemember,
+  captionBreaks = null, captionSettings = null, onCaptionsChange,
+}: EditViewProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const playerRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -360,8 +379,11 @@ export default function EditView({ filename, segments, videoUrl, downloads, save
   const [helpOpen, setHelpOpen] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
   const [selection, setSelection] = useState<{ x: number; y: number; start: number; end: number; text: string } | null>(null);
-  const [mode, setModeState] = useState<"edit" | "proofread">(() => {
-    try { return localStorage.getItem("titan.transcriptMode") === "proofread" ? "proofread" : "edit"; } catch { return "edit"; }
+  const [mode, setModeState] = useState<Mode>(() => {
+    try {
+      const saved = localStorage.getItem("titan.transcriptMode");
+      return saved === "proofread" || saved === "captions" ? saved : "edit";
+    } catch { return "edit"; }
   });
   const [pauseOnEdit, setPauseOnEdit] = useState(true);
   const [rewindOnResume, setRewindOnResume] = useState(true);
@@ -369,14 +391,16 @@ export default function EditView({ filename, segments, videoUrl, downloads, save
   const [rememberIt, setRememberIt] = useState(true);
   const [marksHidden, setMarksHidden] = useState(false);
   const proofread = mode === "proofread";
+  const captionsMode = mode === "captions";
 
-  function setMode(m: "edit" | "proofread") {
+  function setMode(m: Mode) {
     setModeState(m);
     try { localStorage.setItem("titan.transcriptMode", m); } catch { /* private window */ }
   }
 
   const paragraphs = useMemo(() => buildParagraphs(segments), [segments]);
-  const captions = useMemo(() => buildCaptions(segments), [segments]);
+  const capSettings = captionSettings ?? DEFAULT_SETTINGS;
+  const captions = useMemo(() => buildCaptionList(segments, captionBreaks, capSettings), [segments, captionBreaks, capSettings]);
   const allUnsure = useMemo(() => unsureWords(segments), [segments]);
   // Off by default: Whisper confidence alone flags many correct words (phase 1 feedback).
   const unsure = showUnsure ? allUnsure : [];
@@ -387,7 +411,8 @@ export default function EditView({ filename, segments, videoUrl, downloads, save
 
   const activeSeg = segmentAt(segments, time);
   const activePara = activeSeg < 0 ? -1 : paragraphs.findIndex((p) => activeSeg >= p.first && activeSeg <= p.last);
-  const caption = cc ? captionAt(captions, time) : null;
+  const capIdx = captionAt(captions, time);
+  const caption = cc && capIdx >= 0 ? captions[capIdx] : null;
   const checkedFlags = useMemo(() => paragraphs.map((p) => isParagraphChecked(segments, p)), [paragraphs, segments]);
   const checkedCount = checkedFlags.filter(Boolean).length;
   const marks = useMemo(() => wordListMarks(segments), [segments]);
@@ -486,6 +511,40 @@ export default function EditView({ filename, segments, videoUrl, downloads, save
     setEditing({ seg: si, word: word ?? null });
   }, [proofread, pauseOnEdit]);
   const handleCancel = useCallback(() => setEditing(null), []);
+
+  // ── Captions mode ───────────────────────────────────────────────────────────
+
+  const saveCaptions = useCallback((segs: Segment[], breaks: number[] | null, settings: CaptionSettings) => {
+    if (onCaptionsChange) onCaptionsChange(segs, breaks, settings);
+    else if (segs !== segments) onChange(segs);
+  }, [onCaptionsChange, onChange, segments]);
+
+  const handleCapSplit = useCallback((i: number, k: number) => {
+    saveCaptions(segments, splitAt(captions, i, k), { ...capSettings, manual: (capSettings.manual ?? 0) + 1 });
+  }, [saveCaptions, segments, captions, capSettings]);
+
+  const handleCapMerge = useCallback((i: number) => {
+    saveCaptions(segments, mergeWithNext(captions, i), { ...capSettings, manual: (capSettings.manual ?? 0) + 1 });
+  }, [saveCaptions, segments, captions, capSettings]);
+
+  const handleCapFix = useCallback((seg: number, wi: number, value: string) => {
+    // Keep the current cut exactly as it is while the word changes.
+    saveCaptions(fixWord(segments, seg, wi, value), captionBreaks ?? currentBreaks(captions), capSettings);
+  }, [saveCaptions, segments, captionBreaks, captions, capSettings]);
+
+  const handleCapApply = useCallback((settings: CaptionSettings) => {
+    saveCaptions(segments, null, settings);
+  }, [saveCaptions, segments]);
+
+  function downloadSrt() {
+    const blob = new Blob([toSrt(captions)], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${filename.replace(/\.[^.]+$/, "") || "captions"}.srt`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
 
   // ── Proofreading ────────────────────────────────────────────────────────────
 
@@ -670,7 +729,7 @@ export default function EditView({ filename, segments, videoUrl, downloads, save
       else if (e.key === "ArrowLeft") { e.preventDefault(); skip(-5); }
       else if (e.key === "ArrowRight") { e.preventDefault(); skip(5); }
       else if (e.key === "?") setHelpOpen((o) => !o);
-      else if (e.key.toLowerCase() === "e" && activeSeg >= 0) { e.preventDefault(); handleEdit(activeSeg); }
+      else if (e.key.toLowerCase() === "e" && activeSeg >= 0 && !captionsMode) { e.preventDefault(); handleEdit(activeSeg); }
       else if (e.key.toLowerCase() === "n") nextUnsure();
     };
     window.addEventListener("keydown", onKey);
@@ -705,16 +764,22 @@ export default function EditView({ filename, segments, videoUrl, downloads, save
         </span>
         <div className="flex-1" />
         <div role="tablist" aria-label="Mode" className="inline-flex p-[3px] gap-0.5 rounded-xl" style={{ backgroundColor: "var(--surface-raised)" }}>
-          {(["edit", "proofread"] as const).map((m) => (
+          {(["edit", "proofread", "captions"] as const).map((m) => (
             <button key={m} role="tab" aria-selected={mode === m} onClick={() => setMode(m)}
               className="h-8 px-3.5 rounded-[9px] text-[13px] font-medium"
               style={mode === m
                 ? { backgroundColor: "var(--surface)", color: "var(--brand-dark)", boxShadow: "0 1px 2px rgba(30,20,40,.12)" }
                 : { color: "var(--text-secondary)" }}>
-              {m === "edit" ? "Edit" : "Proofread"}
+              {m === "edit" ? "Edit" : m === "proofread" ? "Proofread" : "Captions"}
             </button>
           ))}
         </div>
+        {captionsMode && (
+          <button className={btn} onClick={downloadSrt}
+            style={{ backgroundColor: "var(--brand-dark)", color: "#fff", border: "1px solid var(--brand-dark)" }}>
+            <Icon d={ICONS.download} size={15} />Download SRT
+          </button>
+        )}
         <button className={btn} style={btnStyle} onClick={() => setHelpOpen(true)} aria-label="Keyboard shortcuts">
           <Icon d={ICONS.keys} />
         </button>
@@ -727,7 +792,12 @@ export default function EditView({ filename, segments, videoUrl, downloads, save
             <div role="menu" className="absolute right-0 top-11 z-30 w-[340px] max-w-[calc(100vw-32px)] rounded-[14px] p-1.5"
               style={{ ...panel, boxShadow: "0 16px 40px rgba(30,20,40,.18)" }}>
               {Object.entries(downloads).map(([fmt, info]) => (
-                <a key={fmt} role="menuitem" href={info.url} download onClick={() => setExportOpen(false)}
+                <a key={fmt} role="menuitem" href={info.url} download
+                  onClick={(e) => {
+                    // SRT always matches the captions on screen, including hand changes.
+                    if (fmt === "srt") { e.preventDefault(); downloadSrt(); }
+                    setExportOpen(false);
+                  }}
                   className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] hover:bg-[var(--surface-raised)]"
                   style={{ color: "var(--text-primary)" }}>
                   <span className="whitespace-nowrap">{EXPORT_LABELS[fmt]?.[0] ?? fmt.toUpperCase()}</span>
@@ -851,7 +921,20 @@ export default function EditView({ filename, segments, videoUrl, downloads, save
           )}
         </section>
 
-        {/* Transcript column */}
+        {/* Transcript column, or the captions list in Captions mode */}
+        {captionsMode ? (
+          <CaptionsPanel
+            captions={captions}
+            settings={capSettings}
+            activeIdx={capIdx}
+            playing={playing}
+            onSeek={seek}
+            onSplit={handleCapSplit}
+            onMerge={handleCapMerge}
+            onFixWord={handleCapFix}
+            onApply={handleCapApply}
+          />
+        ) : (
         <section aria-label="Transcript" className="flex-1 min-w-0 h-[75vh] lg:h-auto lg:min-h-0 lg:order-1 rounded-2xl flex flex-col overflow-hidden" style={panel}>
           {proofread && (
             <div className="flex flex-wrap items-center gap-x-5 gap-y-2 px-4 py-3" style={{ borderBottom: "1px solid var(--border)" }}>
@@ -994,6 +1077,7 @@ export default function EditView({ filename, segments, videoUrl, downloads, save
             <span className="ml-auto tabular-nums">{wordCount.toLocaleString()} words</span>
           </div>
         </section>
+        )}
       </div>
 
       {fixOffer && (

@@ -88,7 +88,7 @@ def _merge_orphans(captions: list[dict]) -> list[dict]:
             prev is not None
             and " " not in cap["text"]
             and not prev["text"].endswith(_SENTENCE_END)
-            and len(prev["text"]) + 1 + len(cap["text"]) <= MAX_CAPTION_CHARS + 8
+            and len(prev["text"]) + 1 + len(cap["text"]) <= MAX_CAPTION_CHARS  # strictly one line
             and cap["start"] - prev["end"] < PAUSE_SPLIT_SECONDS
         ):
             prev["text"] = f'{prev["text"]} {cap["text"]}'
